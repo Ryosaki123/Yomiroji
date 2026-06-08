@@ -30,8 +30,12 @@ function Need($cmd, $hint) { if (-not (Get-Command $cmd -ErrorAction SilentlyCon
 
 Need git    "Install Git for Windows."
 Need python "Install Python 3.12.x and tick 'Add python.exe to PATH'."
-$pyv = (& python -c "import sys;print('%d.%d'%sys.version_info[:2])").Trim()
-if ($pyv -ne "3.12") { Write-Host "WARNING: Python $pyv detected; this engine targets 3.12.x (3.11 may still work)." -ForegroundColor Yellow }
+try {
+    $pyout = (& python --version 2>&1 | Out-String).Trim()
+    if ($pyout -match '(\d+)\.(\d+)' -and -not ($Matches[1] -eq '3' -and $Matches[2] -eq '12')) {
+        Write-Host "WARNING: $pyout detected; this engine targets Python 3.12.x (3.11 may still work)." -ForegroundColor Yellow
+    }
+} catch { Write-Host "WARNING: could not determine Python version (continuing)." -ForegroundColor Yellow }
 
 New-Item -ItemType Directory -Force -Path $Offline | Out-Null
 
