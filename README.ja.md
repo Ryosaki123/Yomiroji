@@ -1,6 +1,6 @@
-# Podcast Maker — Irodori TTS
+# Yomiroji
 
-*English: [README.md](README.md)*
+🌐 [English](README.md) · **日本語**
 
 完全ローカル・オフラインで動作するポッドキャスト作成ツールです。話者タグ付きの台本
 （LLM が生成したものなど）を貼り付け、話者ごとに別々のクローン音声を割り当て、会話全体を

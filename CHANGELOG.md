@@ -12,7 +12,8 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-<!-- Add upcoming changes here, grouped by Added / Changed / Fixed / Removed. -->
+### Changed
+- README: added an EN/JA language switcher in the header and set the title to **Yomiroji**.
 
 ## [0.1.0] - 2026-06-08
 

@@ -1,6 +1,6 @@
-# Podcast Maker — Irodori TTS
+# Yomiroji
 
-*日本語版: [README.ja.md](README.ja.md)*
+🌐 **English** · [日本語](README.ja.md)
 
 A fully local, offline podcast maker. Paste an LLM-written script with speaker tags,
 give each speaker a distinct cloned voice, and render the whole conversation into
