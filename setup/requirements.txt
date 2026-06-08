@@ -1,4 +1,4 @@
-dacvae
+dacvae @ git+https://github.com/facebookresearch/dacvae
 datasets>=3.0.0
 gradio>=5.0.0
 huggingface-hub>=0.34.0,<1.0

@@ -32,6 +32,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   fatal under `ErrorActionPreference=Stop`). Rewritten to run native commands without
   letting stderr abort, check real exit codes, drop a redundant `git fetch`, be
   re-runnable (reset/clean before patch), and download models via Python (version-proof).
+- The Python version check used an inline `python -c` whose `%`/`[]` got mangled by
+  PowerShell arg-passing; switched to `python --version` and made the check non-fatal.
+- `setup/requirements.txt` listed `dacvae` (an offline wheel) as a bare name not on
+  PyPI; pointed it at the upstream git source (`git+https://github.com/facebookresearch/dacvae`).
 
 ## [0.1.0] - 2026-06-08
 
