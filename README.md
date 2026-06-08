@@ -7,34 +7,68 @@ give each speaker a distinct cloned voice, and render the whole conversation int
 **one podcast WAV** plus a timestamped transcript (SRT / WebVTT / JSON) for syncing
 with a video clip later.
 
-It reuses the Japanese **Irodori-TTS** models bundled in `../IrodoriTTS-offline`
-(no API, no external network at runtime). Primary audience is Japanese; English is
-structurally supported (per-voice language) and can be validated with an English
-checkpoint later.
+It drives the Japanese **Irodori-TTS** engine and models (by **Aratako**, MIT-licensed),
+which you install yourself — Yomiroji does **not** redistribute the model weights. Once
+set up there is no API and no network at runtime. Primary audience is Japanese; English
+is structurally supported (per-voice language).
 
 It's a small **React single-page app** (`web/`) talking to a local **FastAPI backend**
-(`server/`) that runs the TTS. Both reuse the existing `../IrodoriTTS-offline` venv —
-no extra Python dependencies.
+(`server/`) that runs the TTS. The backend reuses the Irodori-TTS Python env, so there
+are **no extra Python dependencies** of its own.
+
+> **License:** Yomiroji is MIT ([LICENSE](LICENSE)). The Irodori-TTS code and all model
+> weights are by Aratako and also MIT (commercial use permitted). Please follow the
+> models' ethical-use note (no impersonation / deepfakes / misinformation). See
+> [CREDITS.md](CREDITS.md).
 
 ---
 
-## First-time setup
+## Prerequisites
 
-1. Make sure `../IrodoriTTS-offline` is set up (its `.venv` exists — run that project's
-   `run_setup_offline.bat` once if not).
-2. Vendor the frontend assets **once** (needs network this one time):
-   ```powershell
-   .\vendor_fetch.ps1
-   ```
-   (Already done if `web/vendor/react.production.min.js` exists.) After this, the app
-   runs 100% offline.
+- **Windows**, **Python 3.12.x** on PATH, and **git**.
+- An **NVIDIA GPU with a CUDA 12.8 driver** is recommended. No GPU? It still runs on CPU
+  (much slower) — install a CPU build of PyTorch instead (see step 2 notes).
+
+## Setup
+
+```powershell
+# 1. Get Yomiroji
+git clone https://github.com/Ryosaki123/Yomiroji.git
+cd Yomiroji
+
+# 2. Set up the Irodori-TTS engine + models (creates a sibling ..\IrodoriTTS-offline\)
+#    Clones Aratako/Irodori-TTS (pinned commit), applies the offline patch, builds a
+#    venv, and downloads the MIT models from Hugging Face. Needs internet; downloads
+#    several GB (PyTorch + models).
+.\setup_irodori.ps1
+
+# 3. Vendor the frontend libs/fonts locally (one-time, so the UI runs offline)
+.\vendor_fetch.ps1
+```
+
+> CPU-only: after step 2, reinstall torch without CUDA, e.g.
+> `..\IrodoriTTS-offline\.venv\Scripts\python -m pip install torch torchaudio` .
 
 ## Run
 
 ```cmd
 run_podcast.bat
 ```
-Then open <http://127.0.0.1:7864>. You can run it with Wi-Fi off.
+Then open <http://127.0.0.1:7864>. After setup it runs fully offline (Wi-Fi off is fine).
+
+### Manual engine setup (if `setup_irodori.ps1` fails)
+
+It just automates these, into a sibling `..\IrodoriTTS-offline\`:
+1. `git clone https://github.com/Aratako/Irodori-TTS.git irodori-src` →
+   `git checkout d2af4193ea172b4214433e72f24f3b0f13d2c1bd` →
+   `git apply <Yomiroji>\setup\offline-local-patches.patch`
+2. `python -m venv .venv`; install `setup/requirements.txt`
+   (`--extra-index-url https://download.pytorch.org/whl/cu128`) and
+   `pip install --no-deps -e irodori-src`
+3. Download into `models\`: `Aratako/Irodori-TTS-500M-v3` →`base\model.safetensors`,
+   `Aratako/Irodori-TTS-500M-v2-VoiceDesign` →`voicedesign\model.safetensors`,
+   `Aratako/Semantic-DACVAE-Japanese-32dim` →`codec\weights.pth`, and the
+   `llm-jp/llm-jp-3-150m` tokenizer files →`tokenizers\llm-jp__llm-jp-3-150m\`.
 
 > After changing any code, **restart the server** (close the `run_podcast.bat` window
 > and re-run) and **refresh the browser**. The backend sends `Cache-Control: no-store`,
@@ -161,3 +195,12 @@ With the offline env (as set by `run_podcast.bat`):
   first use and can be released via the backend (`POST /api/models/free`).
 - Upstream SilentCipher watermarking is skipped in offline mode (as in the base
   distribution).
+
+## License & credits
+
+- **Yomiroji** (this repo): MIT — see [LICENSE](LICENSE).
+- **Irodori-TTS** engine + models: © **Aratako**, MIT —
+  <https://github.com/Aratako/Irodori-TTS>. Yomiroji does not redistribute the weights;
+  `setup_irodori.ps1` downloads them from Hugging Face.
+- Full attribution and the **ethical-use note** (no impersonation / deepfakes /
+  misinformation) are in [CREDITS.md](CREDITS.md).

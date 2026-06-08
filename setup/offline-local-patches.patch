@@ -1,0 +1,2982 @@
+diff --git a/.python-version b/.python-version
+index c8cfe39..35f236d 100644
+--- a/.python-version
++++ b/.python-version
+@@ -1 +1 @@
+-3.10
++3.12.6
+diff --git a/README.md b/README.md
+index e85c1ae..23ef953 100644
+--- a/README.md
++++ b/README.md
+@@ -6,50 +6,50 @@
+ [![VoiceDesign Demo](https://img.shields.io/badge/VoiceDesign%20Demo-HuggingFace%20Space-red)](https://huggingface.co/spaces/Aratako/Irodori-TTS-500M-v2-VoiceDesign-Demo)
+ [![License: MIT](https://img.shields.io/badge/Code%20License-MIT-green.svg)](LICENSE)
+ 
+-Training and inference code for **Irodori-TTS**, a Flow Matching-based Text-to-Speech model. The architecture and training design largely follow [Echo-TTS](https://jordandarefsky.com/blog/2025/echo/), using [DACVAE](https://github.com/facebookresearch/dacvae) continuous latents as the generation target.
++Irodori-TTS は、Flow Matching を用いた日本語向け Text-to-Speech モデルです。音声は [DACVAE](https://github.com/facebookresearch/dacvae) の連続 latent として扱い、RF-DiT で latent を生成します。設計は [Echo-TTS](https://jordandarefsky.com/blog/2025/echo/) を大きく参考にしています。
+ 
+-For an OpenAI-compatible inference API server, see [Irodori-TTS-Server](https://github.com/Aratako/Irodori-TTS-Server).
++OpenAI 互換の推論 API サーバーを使いたい場合は、[Irodori-TTS-Server](https://github.com/Aratako/Irodori-TTS-Server) を参照してください。
+ 
+ > [!IMPORTANT]
+-> `main` tracks the **v3** codebase and is intended for use with the **Irodori-TTS-500M-v3** base model release.
+-> The current code remains backward-compatible with **Irodori-TTS-500M-v2** checkpoints, including **Irodori-TTS-500M-v2-VoiceDesign**.
+-> If you need the previous v2 codebase state, use the `v2` tag. If you need the previous v1 code, use the `v1` tag.
+-> v1 checkpoints / preprocessing are not compatible with v2/v3.
+-> The previous public v1 model is available at [Aratako/Irodori-TTS-500M](https://huggingface.co/Aratako/Irodori-TTS-500M).
++> `main` は **v3** コードベースです。基本的には **Irodori-TTS-500M-v3** の Base model と組み合わせて使います。
++>
++> 現在のコードは **Irodori-TTS-500M-v2** 系チェックポイントとも後方互換があります。公開済み VoiceDesign モデル **Irodori-TTS-500M-v2-VoiceDesign** もこのコードで動作します。
++>
++> 旧 v2 コードが必要な場合は `v2` タグ、旧 v1 コードが必要な場合は `v1` タグを使ってください。v1 のチェックポイントや前処理は v2/v3 と互換性がありません。
+ 
+-For model weights and audio samples, please refer to the [base model card](https://huggingface.co/Aratako/Irodori-TTS-500M-v3) and the [VoiceDesign model card](https://huggingface.co/Aratako/Irodori-TTS-500M-v2-VoiceDesign).
++モデルの重み、ライセンス、音声サンプルは、[Base model card](https://huggingface.co/Aratako/Irodori-TTS-500M-v3) と [VoiceDesign model card](https://huggingface.co/Aratako/Irodori-TTS-500M-v2-VoiceDesign) を確認してください。
+ 
+-## Features
++## 主な機能
+ 
+-- **Flow Matching TTS**: Rectified Flow Diffusion Transformer (RF-DiT) over continuous DACVAE latents
+-- **Voice Cloning**: Zero-shot voice cloning from reference audio
+-- **Voice Design**: Caption-conditioned style control
+-- **Automatic Duration Prediction**: v3 base checkpoints estimate output length without manual `--seconds`
+-- **Automatic Watermarking**: Generated audio is watermarked with [SilentCipher](https://github.com/sony/silentcipher) when available
+-- **Multi-GPU Training**: Distributed training via `uv run torchrun` with gradient accumulation, mixed precision (bf16), and W&B logging
+-- **PEFT LoRA Fine-Tuning**: Parameter-efficient adaptation with PEFT/LoRA for released checkpoints
+-- **Speaker Inversion**: Learn reusable speaker embedding tokens for a target voice while freezing the base model
+-- **Flexible Inference**: CLI, Gradio Web UI, and HuggingFace Hub checkpoint support
++- **Flow Matching TTS**: DACVAE latent 上で Rectified Flow Diffusion Transformer を実行します。
++- **Voice Cloning**: 参照音声から話者性や雰囲気をゼロショットで反映します。
++- **VoiceDesign**: キャプションで声質、話し方、感情を指定します。
++- **自動長さ推定**: v3 Base model では `--seconds` を省略すると出力長を自動推定します。
++- **Gradio UI**: Base UI と VoiceDesign UI を提供します。
++- **音声編集 UI**: 生成後に簡単な範囲削除、範囲抽出、音声挿入、undo/redo ができます。
++- **学習と微調整**: DDP 学習、LoRA、Speaker Inversion に対応します。
++- **ローカルチェックポイント推論**: Hugging Face Hub だけでなく、手元の `.safetensors` / `.pt` も使えます。
+ 
+-## Architecture
++## モデル構成
+ 
+-The current codebase supports two closely related checkpoint families:
++現在のコードは、主に次の 2 系統のチェックポイントを扱います。
+ 
+-1. **Base model (`Aratako/Irodori-TTS-500M-v3`)**:
+-   Text encoder + reference latent encoder + diffusion transformer + duration predictor. The reference latent encoder consumes patched DACVAE latents from reference audio for speaker/style conditioning. v2 base checkpoints remain supported for inference.
+-2. **VoiceDesign model (`Aratako/Irodori-TTS-500M-v2-VoiceDesign`)**:
+-   Text encoder + caption encoder + diffusion transformer. The caption encoder consumes style-control text and the speaker/reference branch is disabled. A v3 VoiceDesign release is not available yet, so this path still uses the v2 checkpoint.
++| 種類 | モデル | 説明 |
++| --- | --- | --- |
++| Base model | `Aratako/Irodori-TTS-500M-v3` | テキスト、参照音声 latent、duration predictor を使う通常モデルです。v2 Base checkpoint も推論可能です。 |
++| VoiceDesign | `Aratako/Irodori-TTS-500M-v2-VoiceDesign` | テキストとキャプションで声質を指定するモデルです。話者参照ブランチは使いません。現時点で v3 VoiceDesign 公開版はありません。 |
+ 
+-Shared building blocks:
++共通の要素:
+ 
+-1. **Text Encoder**: Token embeddings initialized from a pretrained LLM, followed by self-attention + SwiGLU transformer layers with RoPE
+-2. **Condition Encoder**: Either a reference latent encoder for the base model or a caption encoder for the VoiceDesign model
+-3. **Diffusion Transformer**: Joint-attention DiT blocks with Low-Rank AdaLN (timestep-conditioned adaptive layer normalization), half-RoPE, and SwiGLU MLPs
+-4. **Duration Predictor**: v3 base checkpoints include an integrated predictor for automatic output length estimation
++- Text Encoder: LLM tokenizer 由来の token embedding と Transformer 層。
++- Condition Encoder: Base model では参照音声 latent、VoiceDesign では caption を条件として扱います。
++- Diffusion Transformer: timestep 条件付き AdaLN、RoPE、SwiGLU を使う DiT ブロック。
++- Duration Predictor: v3 Base model に統合された出力長推定器。
++- Codec: 公開 v2/v3 では `Semantic-DACVAE-Japanese-32dim` を使い、48kHz 波形へ復元します。
+ 
+-Audio is represented as continuous latent sequences via the codec configured by the checkpoint. The released v2/v3 checkpoints use the 32-dim [Semantic-DACVAE-Japanese-32dim](https://huggingface.co/Aratako/Semantic-DACVAE-Japanese-32dim) codec for 48kHz waveform reconstruction.
++## インストール
+ 
+-## Installation
++通常のオンライン環境では次のようにセットアップします。
+ 
+ ```bash
+ git clone https://github.com/Aratako/Irodori-TTS.git
+@@ -57,11 +57,13 @@ cd Irodori-TTS
+ uv sync
+ ```
+ 
+-**Note**: For Linux/Windows with CUDA, PyTorch is automatically installed from the cu128 index. For macOS (MPS) or CPU-only usage, `uv sync` will install the default PyTorch build.
++Linux / Windows + CUDA では、PyTorch は cu128 index から自動でインストールされます。macOS MPS や CPU の場合は、通常の PyTorch build が使われます。
+ 
+-## Quick Start
++このオフライン配布版を使う場合は、上位フォルダの `README-OFFLINE.md` を参照してください。
+ 
+-### Simple Inference
++## すぐ使う
++
++### 参照音声ありの推論
+ 
+ ```bash
+ uv run python infer.py \
+@@ -71,7 +73,7 @@ uv run python infer.py \
+   --output-wav outputs/sample.wav
+ ```
+ 
+-### Inference without Reference Audio
++### 参照音声なしの推論
+ 
+ ```bash
+ uv run python infer.py \
+@@ -81,7 +83,7 @@ uv run python infer.py \
+   --output-wav outputs/sample.wav
+ ```
+ 
+-### VoiceDesign Inference
++### VoiceDesign 推論
+ 
+ ```bash
+ uv run python infer.py \
+@@ -92,112 +94,79 @@ uv run python infer.py \
+   --output-wav outputs/sample_voice_design.wav
+ ```
+ 
+-### Speaker Inversion Inference
++### Speaker Inversion 推論
+ 
+-Use a learned Speaker Inversion embedding instead of reference audio:
++Speaker Inversion で作成した話者埋め込みを使う場合は、参照音声の代わりに `--ref-embed` を指定します。
+ 
+ ```bash
+ uv run python infer.py \
+   --checkpoint path/to/Irodori-TTS-500M-v3.safetensors \
+   --ref-embed path/to/my.speaker.safetensors \
+-  --text "こんにちは、私はAIです。これは音声合成のテストです。" \
++  --text "こんにちは、私はAIです。これはSpeaker Inversionのテストです。" \
+   --output-wav outputs/sample_speaker_inversion.wav
+ ```
+ 
+-### Gradio Web UI
++## Gradio Web UI
++
++Base model 用 UI:
+ 
+ ```bash
+ uv run python gradio_app.py --server-name 0.0.0.0 --server-port 7860
+ ```
+ 
+-Then access the UI at `http://localhost:7860`.
+-The hosted v3 demo is available at [Aratako/Irodori-TTS-500M-v3-Demo](https://huggingface.co/spaces/Aratako/Irodori-TTS-500M-v3-Demo).
+-The reference input area supports either reference audio/latent input or a Speaker Inversion embedding via tabs.
++起動後、`http://localhost:7860` を開きます。公開デモは [Irodori-TTS-500M-v3-Demo](https://huggingface.co/spaces/Aratako/Irodori-TTS-500M-v3-Demo) です。
+ 
+-For the VoiceDesign checkpoint, use the dedicated UI:
++VoiceDesign 用 UI:
+ 
+ ```bash
+ uv run python gradio_app_voicedesign.py --server-name 0.0.0.0 --server-port 7861
+ ```
+ 
+-The hosted VoiceDesign demo is available at [Aratako/Irodori-TTS-500M-v2-VoiceDesign-Demo](https://huggingface.co/spaces/Aratako/Irodori-TTS-500M-v2-VoiceDesign-Demo).
++起動後、`http://localhost:7861` を開きます。公開デモは [Irodori-TTS-500M-v2-VoiceDesign-Demo](https://huggingface.co/spaces/Aratako/Irodori-TTS-500M-v2-VoiceDesign-Demo) です。
+ 
+-`gradio_app.py` is for `Aratako/Irodori-TTS-500M-v3`. `gradio_app_voicedesign.py` is for `Aratako/Irodori-TTS-500M-v2-VoiceDesign`.
++`gradio_app.py` は `Aratako/Irodori-TTS-500M-v3` 向け、`gradio_app_voicedesign.py` は `Aratako/Irodori-TTS-500M-v2-VoiceDesign` 向けです。
+ 
+-## Inference
++## 音声編集 UI
+ 
+-### CLI
++Gradio UI には、生成後の WAV を簡単に整えるための `音声編集` パネルがあります。
+ 
+-```bash
+-uv run python infer.py \
+-  --hf-checkpoint Aratako/Irodori-TTS-500M-v3 \
+-  --text "こんにちは、私はAIです。これは音声合成のテストです。" \
+-  --ref-wav path/to/reference.wav \
+-  --output-wav outputs/sample.wav
+-```
++できること:
+ 
+-Local checkpoints (`.pt` or `.safetensors`) are also supported:
++- 生成された候補を編集対象として読み込む。
++- 任意の WAV をアップロードして編集する。
++- 開始秒、終了秒を指定して、選択範囲だけ残す。
++- 開始秒、終了秒を指定して、選択範囲を削除する。
++- 指定秒数の位置に別の音声を挿入する。
++- `元に戻す` / `やり直し` で編集履歴を操作する。
+ 
+-```bash
+-uv run python infer.py \
+-  --checkpoint outputs/checkpoint_final.safetensors \
+-  --text "こんにちは、私はAIです。これは音声合成のテストです。" \
+-  --ref-wav path/to/reference.wav \
+-  --output-wav outputs/sample.wav
+-```
++編集後のファイルは `audio_edits` フォルダに保存されます。
+ 
+-VoiceDesign checkpoints also support caption conditioning:
+-
+-```bash
+-uv run python infer.py \
+-  --hf-checkpoint Aratako/Irodori-TTS-500M-v2-VoiceDesign \
+-  --text "こんにちは、私はAIです。これは音声合成のテストです。" \
+-  --caption "落ち着いた、近い距離感の女性話者" \
+-  --no-ref \
+-  --output-wav outputs/sample_voice_design.wav
+-```
++## 推論オプションの考え方
+ 
+-LoRA adapter directories can be loaded dynamically at inference time without
+-exporting a merged checkpoint:
++詳しい一覧は [パラメータガイド](docs/parameters.md) を参照してください。ここでは最初に触るべき項目だけをまとめます。
+ 
+-```bash
+-uv run python infer.py \
+-  --checkpoint path/to/base_model.safetensors \
+-  --lora-adapter outputs/irodori_tts_lora/checkpoint_final \
+-  --text "こんにちは、私はAIです。これはLoRA推論のテストです。" \
+-  --ref-wav path/to/reference.wav \
+-  --output-wav outputs/sample_lora.wav
+-```
++参考: [note 記事](https://note.com/ren_ai_coach/n/n73e205bdede2)
+ 
+-Speaker Inversion embedding checkpoints can be used with the same base model that
+-was used for inversion training. Pass the embedding with `--ref-embed`;
+-it is mutually exclusive with `--ref-wav`, `--ref-latent`, and `--no-ref`.
++調整の基本は、一度に一つだけ変えることです。複数の値を同時に変えると、どれが効いたのか判断しにくくなります。
+ 
+-```bash
+-uv run python infer.py \
+-  --checkpoint path/to/Irodori-TTS-500M-v3.safetensors \
+-  --ref-embed outputs/speaker_inversion/name/checkpoint_final.speaker.safetensors \
+-  --text "こんにちは、私はAIです。これはSpeaker Inversion推論のテストです。" \
+-  --output-wav outputs/sample_speaker_inversion.wav
+-```
++| 目的 | 主に触る項目 | 目安 |
++| --- | --- | --- |
++| 長さを変える | `--duration-scale` / `--seconds` | v3 Base では `--seconds` を省略し、まず `--duration-scale` を少し動かします。 |
++| 参照音声に寄せる | `--cfg-scale-speaker` | 声がぶれる、似ない場合は少し上げます。硬い場合は少し下げます。 |
++| 読みや感情を強める | `--cfg-scale-text` | 読みが弱い場合に少し上げます。上げすぎると硬くなります。 |
++| VoiceDesign の声を作る | `--caption` / `--seed` | 性別、声の高さ、話し方、感情を短く明確に書き、気に入ったら seed を固定します。 |
++| 速くする | `--num-steps` | まず 40 から 32、または 24 に下げて確認します。 |
++| 安定させる | `--num-steps` | 音が不安定な場合は 32 から 40 へ上げます。 |
+ 
+-### Output Duration
++### 出力長
+ 
+-The v3 base model integrates duration prediction into inference.
+-When `--seconds` is omitted, the runtime estimates the output length from the input
+-text and, for speaker-conditioned checkpoints, the reference audio, then generates
+-audio for that estimated duration. Use `--duration-scale` to multiply the predicted
+-length (`>1` longer, `<1` shorter). For exact control, pass `--seconds` manually.
++v3 Base model は duration predictor を持っています。`--seconds` を省略すると、入力テキストと条件から出力長を推定します。少し長め、短めにしたい場合は `--duration-scale` を使います。
+ 
+-Older v2 checkpoints were trained with fixed-length 30-second targets. They remain
+-supported by the v3 codebase and still accept manual `--seconds`, but forcing a
+-non-default duration can reduce audio quality; prefer the v3 base model for automatic
+-or scaled duration control.
++v2 系チェックポイントは 30 秒固定の学習設定が基本です。手動で `--seconds` を大きく変えると品質が下がる場合があります。
+ 
+ ### Sway Sampling
+ 
+-For faster experimental inference, Sway Sampling can be combined with fewer Euler
+-steps:
++短いステップ数で試したい場合は、Sway Sampling を使えます。
+ 
+ ```bash
+ uv run python infer.py \
+@@ -210,18 +179,11 @@ uv run python infer.py \
+   --output-wav outputs/sample_sway.wav
+ ```
+ 
+-### Additional Inference Notes
+-
+-For tuning guidance and detailed explanations of inference options, see the
+-[Parameter Guide](docs/parameters.md).
++## 学習
+ 
+-Generated audio is passed through [SilentCipher](https://github.com/sony/silentcipher) watermarking automatically when the dependency and model files are available.
++### 1. Manifest を作成する
+ 
+-## Training
+-
+-### 1. Prepare Manifest (Precompute DACVAE Latents)
+-
+-Encodes audio from a Hugging Face dataset into DACVAE latents and produces a JSONL manifest for training.
++`prepare_manifest.py` は Hugging Face dataset またはローカル dataset から音声を読み込み、DACVAE latent を事前計算して JSONL manifest を作成します。
+ 
+ ```bash
+ uv run python prepare_manifest.py \
+@@ -234,7 +196,7 @@ uv run python prepare_manifest.py \
+   --device cuda
+ ```
+ 
+-To include `speaker_id` in the manifest (for speaker-conditioned training):
++話者条件付き学習では `speaker_id` が必要です。dataset に話者列がある場合は次のように指定します。
+ 
+ ```bash
+ uv run python prepare_manifest.py \
+@@ -248,7 +210,7 @@ uv run python prepare_manifest.py \
+   --device cuda
+ ```
+ 
+-To include `caption` in the manifest (for caption-conditioned voice design training):
++VoiceDesign 学習では `caption` を manifest に含めます。
+ 
+ ```bash
+ uv run python prepare_manifest.py \
+@@ -263,20 +225,15 @@ uv run python prepare_manifest.py \
+   --device cuda
+ ```
+ 
+-When training the caption-conditioned voice-design model, `speaker_id` is optional. The
+-voice-design path disables speaker/reference conditioning and learns from `text + caption`.
+-For Speaker Inversion training, the manifest should contain samples of the target voice; `speaker_id`
+-is not required because the run learns one shared speaker embedding.
+-
+-This produces a JSONL manifest with entries like:
++manifest の例:
+ 
+ ```json
+ {"text": "こんにちは", "caption": "落ち着いた、近い距離感の女性話者", "latent_path": "data/latents/00001.pt", "speaker_id": "myorg/my_dataset:speaker_001", "num_frames": 750}
+ ```
+ 
+-### 2. Training
++### 2. 学習を実行する
+ 
+-Single-GPU training:
++単一 GPU 学習:
+ 
+ ```bash
+ uv run python train.py \
+@@ -285,8 +242,7 @@ uv run python train.py \
+   --output-dir outputs/irodori_tts
+ ```
+ 
+-v3 release training uses two phases. After training the body, initialize the integrated
+-duration predictor from the phase-1 checkpoint:
++v3 release は 2 段階で学習します。まず RF/DiT 本体を学習し、その後 duration predictor を学習します。
+ 
+ ```bash
+ uv run python train.py \
+@@ -296,7 +252,7 @@ uv run python train.py \
+   --init-checkpoint outputs/irodori_tts/checkpoint_final.pt
+ ```
+ 
+-VoiceDesign training uses a dedicated config:
++VoiceDesign 学習:
+ 
+ ```bash
+ uv run python train.py \
+@@ -305,25 +261,7 @@ uv run python train.py \
+   --output-dir outputs/irodori_tts_voice_design
+ ```
+ 
+-`configs/train_500m_v2_voice_design.yaml` sets `use_caption_condition: true` and disables the
+-speaker/reference branch. Caption-free configs continue to use speaker conditioning when
+-`speaker_id` / reference inputs are available.
+-
+-The VoiceDesign config also enables `caption_warmup: true` for optional caption-branch warmup.
+-`warmup_steps` controls the LR scheduler, while `caption_warmup_steps` controls how long
+-non-caption gradients are discarded before normal joint training resumes.
+-
+-### v3 Duration Predictor Training
+-
+-v3 training uses two phases: `configs/train_500m_v3_phase1_body.yaml` trains the
+-variable-length DiT body, then `configs/train_500m_v3_phase2_duration.yaml` freezes the
+-body and trains the duration predictor.
+-
+-The duration predictor regresses `log1p(num_frames)` with Huber loss. The current v3 phase2
+-config uses the token-sum duration predictor selected from ablations; see the parameter
+-guide for the architecture details.
+-
+-Multi-GPU DDP training:
++複数 GPU DDP 学習:
+ 
+ ```bash
+ uv run torchrun --nproc_per_node 4 train.py \
+@@ -333,12 +271,9 @@ uv run torchrun --nproc_per_node 4 train.py \
+   --device cuda
+ ```
+ 
+-Training supports YAML config files with `model` and `train` sections. CLI arguments take precedence over YAML values. See `uv run python train.py --help` for all available options.
+-For a more detailed explanation of model and training config fields, see [Parameter Guide](docs/parameters.md).
+-
+-#### Fine-Tuning from Released Weights
++### LoRA 微調整
+ 
+-Start a new training run from released inference weights (`.safetensors`). This initializes only the model weights; optimizer / scheduler state starts fresh. For the v3 base release, the LoRA config keeps the duration predictor as part of the saved adapter by default.
++公開済み `.safetensors` から LoRA 微調整を始める例です。optimizer や scheduler は新規に開始されます。
+ 
+ ```bash
+ uv run python train.py \
+@@ -348,7 +283,7 @@ uv run python train.py \
+   --init-checkpoint path/to/Irodori-TTS-500M-v3.safetensors
+ ```
+ 
+-Caption-conditioned voice-design LoRA fine-tuning:
++VoiceDesign LoRA:
+ 
+ ```bash
+ uv run python train.py \
+@@ -358,17 +293,11 @@ uv run python train.py \
+   --init-checkpoint path/to/Irodori-TTS-500M-v2-VoiceDesign.safetensors
+ ```
+ 
+-LoRA target presets, adapter saving behavior, and resume details are covered in the
+-[Parameter Guide](docs/parameters.md).
++LoRA の対象モジュール、保存形式、再開方法は [パラメータガイド](docs/parameters.md) にまとめています。
+ 
+-#### Speaker Inversion
++### Speaker Inversion
+ 
+-Speaker Inversion trains only a small set of speaker embedding tokens while keeping the
+-base Irodori-TTS model frozen. It is useful when you want a reusable speaker identity
+-checkpoint instead of providing reference audio at every inference call.
+-
+-Prepare a manifest from the target speaker's audio, then initialize from the released v3
+-base checkpoint:
++Speaker Inversion はモデル本体を凍結し、話者を表す少数の embedding token だけを学習します。毎回参照音声を渡す代わりに、再利用できる `.speaker.safetensors` を作れます。
+ 
+ ```bash
+ uv run python train.py \
+@@ -378,9 +307,13 @@ uv run python train.py \
+   --output-dir outputs/speaker_inversion/name
+ ```
+ 
+-The saved checkpoints are embedding-only `.speaker.safetensors` files, for example
+-`outputs/speaker_inversion/name/checkpoint_final.speaker.safetensors`. Use that file
+-with the base model during inference:
++出力例:
++
++```text
++outputs/speaker_inversion/name/checkpoint_final.speaker.safetensors
++```
++
++推論時は次のように使います。
+ 
+ ```bash
+ uv run python infer.py \
+@@ -390,14 +323,9 @@ uv run python infer.py \
+   --output-wav outputs/sample_speaker_inversion.wav
+ ```
+ 
+-To continue from a saved embedding, set `speaker_inversion_init_embedding` in the
+-config or pass `--speaker-inversion-init-embedding path/to/checkpoint.speaker.safetensors`.
+-Full trainer `--resume` is intentionally not used for Speaker Inversion checkpoints.
+-Enable `gradient_checkpointing: true` or pass `--gradient-checkpointing` if GPU memory is tight.
+-
+-#### Resuming Interrupted Training
++### 中断した学習の再開
+ 
+-Resume an existing training run from a training checkpoint. Full-model runs use `.pt`; LoRA runs use checkpoint directories. Both restore optimizer, scheduler, and step state.
++通常学習の再開:
+ 
+ ```bash
+ uv run python train.py \
+@@ -407,7 +335,7 @@ uv run python train.py \
+   --resume outputs/irodori_tts/checkpoint_0010000.pt
+ ```
+ 
+-LoRA resume example:
++LoRA 学習の再開:
+ 
+ ```bash
+ uv run python train.py \
+@@ -417,77 +345,77 @@ uv run python train.py \
+   --resume outputs/irodori_tts_lora/checkpoint_0010000
+ ```
+ 
+-If you move a LoRA checkpoint to another environment and the original base-checkpoint path is no longer valid, pass `--init-checkpoint path/to/base_model.safetensors` together with `--resume` to override the saved base-model path.
++LoRA checkpoint を別環境へ移した結果、元の base checkpoint パスが無効になった場合は、`--resume` と一緒に `--init-checkpoint path/to/base_model.safetensors` を渡してください。
+ 
+-### 3. Checkpoint Conversion
++### 3. Checkpoint 変換
+ 
+-Convert a training checkpoint to inference-only safetensors format:
++学習用 checkpoint を推論用 `.safetensors` へ変換します。
+ 
+ ```bash
+ uv run python convert_checkpoint_to_safetensors.py outputs/checkpoint_final.pt
+ ```
+ 
+-LoRA adapter checkpoints can also be converted directly:
++LoRA adapter checkpoint も変換できます。
+ 
+ ```bash
+ uv run python convert_checkpoint_to_safetensors.py outputs/irodori_tts_lora/checkpoint_final
+ ```
+ 
+-LoRA adapter checkpoints are merged into the base model automatically during conversion, so the exported `.safetensors` file is directly usable for inference. If you do not want to merge the adapter, pass the adapter directory directly to `infer.py --lora-adapter` or the matching Gradio field.
++変換時、LoRA adapter は base model に merge され、出力された `.safetensors` はそのまま推論に使えます。merge したくない場合は、`infer.py --lora-adapter` または Gradio の対応フィールドで adapter directory を直接指定してください。
+ 
+-## Project Structure
++## プロジェクト構成
+ 
+ ```text
+ Irodori-TTS/
+-├── train.py                    # Training entry point (DDP support)
+-├── infer.py                    # CLI inference
+-├── gradio_app.py               # Gradio web UI
+-├── gradio_app_voicedesign.py   # Gradio web UI for VoiceDesign checkpoints
+-├── prepare_manifest.py         # Dataset -> DACVAE latent preprocessing
+-├── convert_checkpoint_to_safetensors.py  # Checkpoint converter
++├── train.py                    # 学習エントリポイント、DDP 対応
++├── infer.py                    # CLI 推論
++├── gradio_app.py               # Base model 用 Gradio UI
++├── gradio_app_voicedesign.py   # VoiceDesign 用 Gradio UI
++├── prepare_manifest.py         # Dataset から DACVAE latent を作成
++├── convert_checkpoint_to_safetensors.py
+ │
+ ├── docs/
+-│   └── parameters.md         # Detailed parameter guide
++│   └── parameters.md           # 詳細なパラメータガイド
+ │
+-├── irodori_tts/                # Core library
+-│   ├── model.py                # TextToLatentRFDiT architecture
+-│   ├── rf.py                   # Rectified Flow utilities & Euler CFG sampling
++├── irodori_tts/                # コアライブラリ
++│   ├── model.py                # TextToLatentRFDiT
++│   ├── rf.py                   # Rectified Flow と Euler CFG sampling
+ │   ├── codec.py                # DACVAE codec wrapper
+-│   ├── dataset.py              # Dataset and collator
+-│   ├── tokenizer.py            # Pretrained LLM tokenizer wrapper
+-│   ├── config.py               # Model / Train / Sampling config dataclasses
+-│   ├── inference_runtime.py    # Cached, thread-safe inference runtime
+-│   ├── lora.py                 # PEFT LoRA integration helpers
+-│   ├── speaker_inversion.py    # Speaker Inversion embedding save/load helpers
+-│   ├── text_normalization.py   # Japanese text normalization
++│   ├── dataset.py              # Dataset と collator
++│   ├── tokenizer.py            # LLM tokenizer wrapper
++│   ├── config.py               # Model / Train / Sampling config
++│   ├── inference_runtime.py    # 推論 runtime
++│   ├── lora.py                 # PEFT LoRA helper
++│   ├── speaker_inversion.py    # Speaker Inversion helper
++│   ├── text_normalization.py   # 日本語テキスト正規化
+ │   ├── optim.py                # Muon + AdamW optimizer
+-│   └── progress.py             # Training progress tracker
++│   └── progress.py             # 学習進捗表示
+ │
+ └── configs/
+-    ├── train_500m_v3_phase1_body.yaml        # 500M v3 body training config
+-    ├── train_500m_v3_phase2_duration.yaml    # 500M v3 duration-predictor training config
+-    ├── train_500m_v3_lora.yaml               # 500M v3 LoRA fine-tuning config
+-    ├── train_500m_v3_speaker_inversion.yaml  # 500M v3 Speaker Inversion config
+-    ├── train_500m_v2.yaml                    # 500M v2 backward-compatible model config
+-    ├── train_500m_v2_lora.yaml               # 500M v2 LoRA fine-tuning config
+-    ├── train_500m_v2_voice_design.yaml       # 500M v2 VoiceDesign full fine-tuning config
+-    ├── train_500m_v2_voice_design_lora.yaml  # 500M v2 VoiceDesign LoRA fine-tuning config
+-    ├── train_500m.yaml                       # 500M v1 model config
+-    └── train_2.5b.yaml                       # 2.5B parameter model config
++    ├── train_500m_v3_phase1_body.yaml
++    ├── train_500m_v3_phase2_duration.yaml
++    ├── train_500m_v3_lora.yaml
++    ├── train_500m_v3_speaker_inversion.yaml
++    ├── train_500m_v2.yaml
++    ├── train_500m_v2_lora.yaml
++    ├── train_500m_v2_voice_design.yaml
++    ├── train_500m_v2_voice_design_lora.yaml
++    ├── train_500m.yaml
++    └── train_2.5b.yaml
+ ```
+ 
+-## License
++## ライセンス
+ 
+-- **Code**: [MIT License](LICENSE)
+-- **Model Weights**: Please refer to the [base model card](https://huggingface.co/Aratako/Irodori-TTS-500M-v3) and the [VoiceDesign model card](https://huggingface.co/Aratako/Irodori-TTS-500M-v2-VoiceDesign) for licensing details
++- **コード**: [MIT License](LICENSE)
++- **モデル重み**: [Base model card](https://huggingface.co/Aratako/Irodori-TTS-500M-v3) と [VoiceDesign model card](https://huggingface.co/Aratako/Irodori-TTS-500M-v2-VoiceDesign) を確認してください。
+ 
+-## Acknowledgments
++## 謝辞
+ 
+-This project builds upon the following works:
++このプロジェクトは次の成果を参考、または利用しています。
+ 
+-- [Echo-TTS](https://jordandarefsky.com/blog/2025/echo/) — Architecture and training design reference
+-- [DACVAE](https://github.com/facebookresearch/dacvae) — Audio VAE
+-- [SilentCipher](https://github.com/sony/silentcipher) — Audio watermarking
++- [Echo-TTS](https://jordandarefsky.com/blog/2025/echo/): アーキテクチャと学習設計の参考
++- [DACVAE](https://github.com/facebookresearch/dacvae): Audio VAE
++- [SilentCipher](https://github.com/sony/silentcipher): 音声 watermark
+ 
+ ## Citation
+ 
+diff --git a/docs/parameters.md b/docs/parameters.md
+index 7e55176..d938c1d 100644
+--- a/docs/parameters.md
++++ b/docs/parameters.md
+@@ -1,95 +1,89 @@
+-# Irodori-TTS Parameter Guide
+-
+-This document explains the main inference and training parameters used by Irodori-TTS.
+-
+-## Version Notes
+-
+-`main` currently targets the v3 codebase. It remains backward-compatible with v2
+-checkpoints, including the current VoiceDesign release.
+-
+-- v3 base checkpoints include the integrated duration predictor and can estimate output
+-  length automatically when `--seconds` is omitted.
+-- v3 base release training is split into two phases: first the RF/DiT body, then
+-  `duration_only` training for the duration predictor.
+-- v2 checkpoints do not include the duration predictor and were trained with fixed
+-  30-second targets, but they are still supported by the v3 code.
+-- VoiceDesign checkpoints currently use the v2 release, set `use_caption_condition: true`,
+-  and intentionally disable speaker/reference conditioning.
+-
+-## Inference Parameters
+-
+-### Checkpoint Selection
+-
+-| Parameter | Default | Notes |
+-|-----------|---------|-------|
+-| `--checkpoint` | required unless `--hf-checkpoint` is set | Local `.pt` or `.safetensors` checkpoint. Use this for converted local checkpoints or downloaded model files that you want to reference directly. |
+-| `--hf-checkpoint` | required unless `--checkpoint` is set | Hugging Face repo id. The runtime downloads `model.safetensors` from the repo. |
+-| `--lora-adapter` | `None` | Optional PEFT LoRA adapter directory loaded dynamically at inference time. The adapter is not merged into the base checkpoint. |
+-| `--codec-repo` | `Aratako/Semantic-DACVAE-Japanese-32dim` | DACVAE codec used to encode reference audio and decode generated latents. It should normally match the checkpoint metadata. |
+-
+-Use either `--checkpoint` or `--hf-checkpoint`, not both.
+-
+-### Text, Caption, and Reference Conditioning
+-
+-| Parameter | Default | Notes |
+-|-----------|---------|-------|
+-| `--text` | required | Text to synthesize. It is tokenized with the checkpoint's text tokenizer. |
+-| `--caption` | `None` | Voice and style-control text for VoiceDesign checkpoints. Ignored or ineffective for checkpoints without caption conditioning. |
+-| `--ref-wav` | `None` | Reference waveform used for speaker/style conditioning in the base model. |
+-| `--ref-latent` | `None` | Precomputed reference latent (`.pt`) used instead of encoding `--ref-wav` at inference time. Useful for repeated inference with the same reference. |
+-| `--no-ref` | `False` | Disables speaker/reference conditioning. Use this for VoiceDesign checkpoints, or for text-only inference with base checkpoints. |
+-| `--ref-embed` | `None` | Speaker Inversion embedding (`.speaker.safetensors`) path. Mutually exclusive with `--ref-wav`, `--ref-latent`, and `--no-ref`. Use the file produced by Speaker Inversion training instead of a reference waveform. |
+-| `--max-ref-seconds` | `30.0` | Caps the reference audio duration before encoding. The released models were trained on audio up to 30 seconds, so keeping the default cap is recommended. Set `<=0` only when you intentionally want to disable the cap. |
+-| `--ref-normalize-db` | `-16.0` | Loudness target applied to reference audio before DACVAE encode. This normalization was used when training the codec, so keeping the default is recommended. Use `none` only for controlled experiments. |
+-| `--ref-ensure-max` | `True` | When loudness normalization is disabled, scales the reference down only if peak amplitude exceeds `1.0`. In normal use, prefer leaving loudness normalization enabled instead of relying on this fallback. |
+-| `--max-text-len` | checkpoint metadata or `256` | Maximum text token length. Longer text is truncated. Keeping the checkpoint/training-time setting is recommended. |
+-| `--max-caption-len` | checkpoint metadata or `max_text_len` | Maximum caption token length for VoiceDesign checkpoints. Keeping the checkpoint/training-time setting is recommended. |
+-
+-Reference audio is a conditioning signal, not the generated target. Short, clean
+-references may work well, but the more important point is to avoid music, noise, or
+-multiple speakers.
+-For speaker-conditioned checkpoints, `--ref-latent` is the fastest path when the same
+-speaker reference is reused many times.
+-
+-### Duration Control
+-
+-| Parameter | Default | Notes |
+-|-----------|---------|-------|
+-| `--seconds` | `None` | Manual output duration. If set, it always overrides the default duration behavior. |
+-| `--duration-scale` | `1.0` | Multiplies the predicted duration when duration prediction is used. Values above `1.0` produce longer audio; values below `1.0` produce shorter audio. |
+-
+-The recommended duration behavior depends on the checkpoint:
+-
+-- v2 checkpoints, including the VoiceDesign release, were trained with fixed 30-second
+-  targets. Setting a different duration is not recommended because it moves inference
+-  away from the training setup.
+-- v3 base checkpoints were trained with variable-length targets and an integrated
+-  duration predictor. For these checkpoints, leaving `--seconds` unset is recommended so
+-  the model can choose the duration automatically. Manual `--seconds` is still available
+-  when exact control is needed.
+-
+-When `--seconds` is omitted, the runtime checks whether the loaded checkpoint has
+-duration-predictor weights. If it does, the predicted frame count is used and then scaled
+-by `--duration-scale`. If it does not, the runtime falls back to 30 seconds.
+-
+-### Sampling and Candidate Generation
+-
+-| Parameter | Default | Notes |
+-|-----------|---------|-------|
+-| `--num-steps` | `40` | Number of Euler integration steps. Higher values are slower and can improve stability up to a point. |
+-| `--t-schedule-mode` | `linear` | Timestep schedule for RF Euler sampling. Use `sway` to enable Sway Sampling. |
+-| `--sway-coeff` | `-1.0` | Sway Sampling coefficient. Negative values allocate more schedule resolution to the noise side. |
+-| `--num-candidates` | `1` | Number of candidates generated in one batched sampling pass. Higher values increase VRAM use. |
+-| `--decode-mode` | `sequential` | `sequential` decodes candidates one by one and uses less VRAM. `batch` decodes all candidates together and can be faster. |
+-| `--seed` | random | Sampling seed. Set it for reproducible results with the same checkpoint and parameters. |
+-| `--truncation-factor` | `None` | Scales the initial Gaussian noise before sampling. Values such as `0.8` or `0.9` can reduce variation, but may also reduce expressiveness. |
+-| `--rescale-k` / `--rescale-sigma` | `None` | Temporal score rescaling parameters. Set both together or leave both unset. |
+-
+-`--num-steps` is usually the first quality/speed knob to try. For quick experiments,
+-lower values can be acceptable; for final samples, start from the default before making
+-other changes.
+-
+-For lower-latency experiments, try Sway Sampling with fewer steps:
++# Irodori-TTS パラメータガイド
++
++この文書では、Irodori-TTS の推論、学習、manifest 作成でよく使うパラメータを説明します。CLI オプション名や config の field 名は、実際に指定する名前を確認しやすいよう英語のまま残しています。
++
++参考: [note 記事](https://note.com/ren_ai_coach/n/n73e205bdede2)
++
++## バージョンの注意
++
++`main` は v3 コードベースです。現在の VoiceDesign 公開版を含む v2 checkpoint とも後方互換があります。
++
++- v3 Base checkpoint は duration predictor を含み、`--seconds` を省略すると出力長を自動推定できます。
++- v3 Base release の学習は、RF/DiT 本体の学習と duration predictor の学習に分かれています。
++- v2 checkpoint は duration predictor を持たず、30 秒固定 target で学習されています。ただし v3 コードから推論できます。
++- VoiceDesign checkpoint は現時点では v2 release です。`use_caption_condition: true` を使い、speaker/reference conditioning は無効です。
++
++## 調整の基本
++
++最初から多くの値を同時に変えないでください。一度に一つだけ変えて、生成して、聴いて、必要なら次を変えるのが一番確実です。
++
++最初に触る項目:
++
++- `--duration-scale` / `--seconds`: v3 Base model では `--seconds` を省略し、必要に応じて `--duration-scale` を少し動かします。
++- `--cfg-scale-speaker`: 参照音声にどれだけ寄せるかを調整します。似ない、声がぶれる場合は少し上げ、硬くなる場合は少し下げます。
++- `--caption`: VoiceDesign の声質指定です。性別、声の高さ、話し方、感情を短く明確に書きます。
++- `--num-steps`: 速度と安定性の調整です。速くしたい場合は下げ、音が不安定な場合は上げます。
++- `--seed`: 再現性を確保します。気に入った声が出たら固定します。
++
++## 推論パラメータ
++
++### Checkpoint 選択
++
++| パラメータ | 既定値 | 説明 |
++| --- | --- | --- |
++| `--checkpoint` | `--hf-checkpoint` がない場合は必須 | ローカルの `.pt` または `.safetensors` checkpoint を直接指定します。オフライン配布では基本的にこちらを使います。 |
++| `--hf-checkpoint` | `--checkpoint` がない場合は必須 | Hugging Face repo id を指定します。通常は repo から `model.safetensors` を取得します。オフライン環境では使わないでください。 |
++| `--lora-adapter` | `None` | 推論時に PEFT LoRA adapter directory を動的に読み込みます。base checkpoint には merge されません。 |
++| `--codec-repo` | `Aratako/Semantic-DACVAE-Japanese-32dim` | 参照音声の encode と生成 latent の decode に使う DACVAE codec です。通常は checkpoint metadata に合わせます。オフライン配布では `models/codec` を指定します。 |
++
++`--checkpoint` と `--hf-checkpoint` はどちらか一方だけを使います。
++
++### テキスト、キャプション、参照条件
++
++| パラメータ | 既定値 | 説明 |
++| --- | --- | --- |
++| `--text` | 必須 | 合成する文章です。checkpoint の text tokenizer で tokenization されます。 |
++| `--caption` | `None` | VoiceDesign checkpoint で声質やスタイルを指定する文章です。caption conditioning がない checkpoint では効果がありません。 |
++| `--ref-wav` | `None` | Base model で話者性やスタイルを指定する参照音声です。 |
++| `--ref-latent` | `None` | 事前計算済み参照 latent `.pt` です。同じ参照音声を何度も使う場合に高速です。 |
++| `--no-ref` | `False` | speaker/reference conditioning を無効にします。VoiceDesign や、参照音声なしの Base 推論で使います。 |
++| `--ref-embed` | `None` | Speaker Inversion で作成した `.speaker.safetensors` です。`--ref-wav`、`--ref-latent`、`--no-ref` とは同時に使えません。 |
++| `--max-ref-seconds` | `30.0` | encode 前に参照音声の最大秒数を制限します。公開モデルは 30 秒までの音声で学習されているため、通常は既定値推奨です。 |
++| `--ref-normalize-db` | `-16.0` | DACVAE encode 前の loudness normalization です。学習時と合わせるため、通常は有効のままにします。 |
++| `--ref-ensure-max` | `True` | loudness normalization 無効時、peak amplitude が `1.0` を超える場合だけ縮小します。通常は `--ref-normalize-db` を使う方が安全です。 |
++| `--max-text-len` | checkpoint metadata または `256` | text token の最大長です。長い text は切り詰められます。 |
++| `--max-caption-len` | checkpoint metadata または `max_text_len` | VoiceDesign の caption token 最大長です。 |
++
++参照音声は「生成したい内容」ではなく「話者や雰囲気の条件」です。短くてもよいので、ノイズ、BGM、複数話者を避けた明瞭な音声を使ってください。
++
++### 出力長
++
++| パラメータ | 既定値 | 説明 |
++| --- | --- | --- |
++| `--seconds` | `None` | 出力秒数を手動指定します。指定すると自動推定より優先されます。 |
++| `--duration-scale` | `1.0` | duration predictor が推定した長さに掛ける倍率です。`1.0` より大きいと長く、小さいと短くなります。 |
++
++checkpoint ごとの推奨:
++
++- v3 Base checkpoint: `--seconds` を省略し、自動推定に任せるのが基本です。少し調整したい場合は `--duration-scale` を使います。
++- v2 checkpoint / VoiceDesign: 30 秒固定 target で学習されています。大きく異なる `--seconds` は品質を下げる可能性があります。
++
++### Sampling と候補生成
++
++| パラメータ | 既定値 | 説明 |
++| --- | --- | --- |
++| `--num-steps` | `40` | Euler integration step 数です。大きいほど遅くなりますが、一定範囲では安定性が上がります。 |
++| `--t-schedule-mode` | `linear` | RF Euler sampling の timestep schedule です。`sway` で Sway Sampling を使います。 |
++| `--sway-coeff` | `-1.0` | Sway Sampling の係数です。負の値では noise 側に schedule 解像度が寄ります。 |
++| `--num-candidates` | `1` | 一度に生成する候補数です。増やすと VRAM 使用量も増えます。 |
++| `--decode-mode` | `sequential` | `sequential` は候補を一つずつ decode して VRAM を抑えます。`batch` はまとめて decode し、速い場合があります。 |
++| `--seed` | random | sampling seed です。同じ checkpoint とパラメータで再現したい場合に固定します。 |
++| `--truncation-factor` | `None` | sampling 開始時の Gaussian noise を縮小します。`0.8` や `0.9` でばらつきを抑えられる場合がありますが、表現力が落ちることもあります。 |
++| `--rescale-k` / `--rescale-sigma` | `None` | temporal score rescaling の値です。使う場合は両方指定します。通常は未指定で構いません。 |
++
++`--num-steps` は最初に触る品質/速度の knob です。会話用途なら 24 から 32、保存用なら 40 前後を目安にします。
++
++Sway Sampling の例:
+ 
+ ```bash
+ uv run python infer.py \
+@@ -104,351 +98,296 @@ uv run python infer.py \
+ 
+ ### Classifier-Free Guidance
+ 
+-| Parameter | Default | Notes |
+-|-----------|---------|-------|
+-| `--cfg-scale-text` | `3.0` | Guidance strength for text conditioning. Higher values force the text condition more strongly. |
+-| `--cfg-scale-caption` | `3.0` | Guidance strength for caption/style conditioning. Applies to VoiceDesign checkpoints. |
+-| `--cfg-scale-speaker` | `5.0` | Guidance strength for reference speaker conditioning. Ignored when speaker conditioning is disabled. |
+-| `--cfg-guidance-mode` | `independent` | CFG formulation: `independent`, `joint`, or `alternating`. |
+-| `--cfg-scale` | `None` | Deprecated shared override for all enabled CFG scales. Prefer the per-condition scale parameters. |
+-| `--cfg-min-t` | `0.5` | Lower timestep bound where CFG is active. |
+-| `--cfg-max-t` | `1.0` | Upper timestep bound where CFG is active. |
+-
+-In `independent` mode, each enabled condition gets its own unconditional branch in a
+-single larger batch. This is the most flexible mode for using different text, caption,
+-and speaker scales, but the batch size during CFG steps grows with the number of enabled
+-conditions, so it can use more VRAM and compute. In NFE terms, it is
+-`1 + number_of_enabled_cfg_conditions` during CFG-active steps; the released base and
+-VoiceDesign setups commonly have two enabled CFG conditions, so this is typically 3x.
+-`joint` drops all enabled conditions together and expects equal CFG scales; it uses the
+-conditional branch plus one joint unconditional branch during CFG steps, so it is 2x
+-NFE. `alternating` also uses one unconditional branch per CFG step, so it is 2x NFE,
+-but alternates which condition is dropped at each step.
+-
+-Increasing a CFG scale can improve adherence to that condition, but very high values may
+-make speech less natural. If pronunciation is weak, try increasing `--cfg-scale-text`
+-slightly. If speaker similarity is weak, try `--cfg-scale-speaker` or the speaker K/V
+-controls below.
++| パラメータ | 既定値 | 説明 |
++| --- | --- | --- |
++| `--cfg-scale-text` | `3.0` | text condition の強さです。上げると読みや内容への追従が強くなります。 |
++| `--cfg-scale-caption` | `3.0` | caption/style condition の強さです。VoiceDesign checkpoint で使います。 |
++| `--cfg-scale-speaker` | `5.0` | reference speaker condition の強さです。speaker conditioning が無効な場合は使われません。 |
++| `--cfg-guidance-mode` | `independent` | CFG の計算方式です。`independent`、`joint`、`alternating` があります。 |
++| `--cfg-scale` | `None` | 古い共通 CFG override です。通常は個別の `--cfg-scale-*` を使ってください。 |
++| `--cfg-min-t` | `0.5` | CFG が有効になる timestep 下限です。 |
++| `--cfg-max-t` | `1.0` | CFG が有効になる timestep 上限です。 |
++
++`independent` は text、caption、speaker それぞれの CFG scale を別々に扱いやすい方式です。その分、CFG 有効 step で batch が大きくなり、VRAM と計算量を使います。
++
++`joint` は有効な条件をまとめて drop するため計算量を抑えやすいですが、条件ごとに細かく scale を変える用途には向きません。
++
++`alternating` は各 step で drop する条件を切り替える方式です。
++
++scale を上げると条件への追従は強くなりますが、上げすぎると不自然、硬い、抑揚が弱い音声になる場合があります。
+ 
+ ### Speaker K/V Scaling
+ 
+-| Parameter | Default | Notes |
+-|-----------|---------|-------|
+-| `--speaker-kv-scale` | `None` | Extra scaling applied to speaker context K/V projections. Values above `1.0` can strengthen speaker identity. |
+-| `--speaker-kv-min-t` | `0.9` | Applies speaker K/V scaling only while `t >= value`. |
+-| `--speaker-kv-max-layers` | `None` | Limits speaker K/V scaling to the first N diffusion layers. |
++| パラメータ | 既定値 | 説明 |
++| --- | --- | --- |
++| `--speaker-kv-scale` | `None` | speaker context の K/V projection に追加 scale をかけます。`1.0` より大きい値で話者性が強まる場合があります。 |
++| `--speaker-kv-min-t` | `0.9` | `t >= value` の範囲だけ speaker K/V scaling を適用します。 |
++| `--speaker-kv-max-layers` | `None` | 最初の N diffusion layer だけに speaker K/V scaling を制限します。 |
+ 
+-These parameters are experimental speaker-similarity controls. They are only meaningful
+-for speaker-conditioned checkpoints with reference conditioning enabled. If the generated
+-voice drifts from the reference, try moderate `--speaker-kv-scale` values before making
+-large CFG changes.
++これは実験的な話者類似度 control です。参照音声ありの speaker-conditioned checkpoint でのみ意味があります。
+ 
+ ### Speaker Inversion
+ 
+-Speaker Inversion trains a compact set of learned tokens that represent a speaker identity.
+-At inference, load the resulting `.speaker.safetensors` file with `--ref-embed` instead of
+-a reference waveform.
+-
+-| Parameter | Default | Notes |
+-|-----------|---------|-------|
+-| `--speaker-uncond-mode` | `mask` | Unconditional speaker formulation for CFG when using `--ref-embed`. `mask`: zero tokens with a false mask (default, lower VRAM). `noise`: Gaussian noise scaled to the standard deviation of the embedding. |
+-
+-### Devices, Precision, and Compilation
+-
+-| Parameter | Default | Notes |
+-|-----------|---------|-------|
+-| `--model-device` | auto | Device for the RF-DiT model, for example `cuda`, `mps`, or `cpu`. |
+-| `--codec-device` | auto | Device for DACVAE encode/decode. It can differ from `--model-device`. |
+-| `--model-precision` | `fp32` | Model compute precision: `fp32` or `bf16`. |
+-| `--codec-precision` | `fp32` | Codec compute precision: `fp32` or `bf16`. |
+-| `--compile-model` | `False` | Enables `torch.compile` for core inference methods. First run is slower due to compilation. |
+-| `--compile-dynamic` | `False` | Uses `dynamic=True` with `torch.compile`. |
+-| `--context-kv-cache` | `True` | Precomputes text/speaker/caption K/V projections for faster sampling. |
+-
+-For CUDA inference, `bf16` can reduce memory use and improve speed on supported GPUs.
+-For CPU or MPS, `fp32` is the safer default. `--compile-model` is most useful when
+-running many requests with similar shapes.
+-
+-### Tail Trimming and Timings
+-
+-| Parameter | Default | Notes |
+-|-----------|---------|-------|
+-| `--trim-tail` | `True` | Trims trailing near-zero latent regions with a flattening heuristic. |
+-| `--tail-window-size` | `20` | Window size used by the tail-trimming heuristic. |
+-| `--tail-std-threshold` | `0.05` | Standard deviation threshold for tail trimming. |
+-| `--tail-mean-threshold` | `0.1` | Mean threshold for tail trimming. |
+-| `--show-timings` | `True` | Prints timing breakdowns for major inference stages. |
+-
+-Tail trimming was mainly introduced for v2 checkpoints, which generate fixed 30-second
+-outputs and can leave unused trailing regions after the spoken content. It is less
+-important for v3 base checkpoints because they predict a more appropriate output length.
+-If valid audio is being trimmed too aggressively, disable `--trim-tail` first.
+-Adjust the tail thresholds only when you need fine control over the trimming heuristic.
+-
+-## Training Parameters
+-
+-Training is configured through YAML files with `model` and `train` sections. CLI options
+-override YAML values when explicitly provided.
+-
+-### Data and Checkpoint Flow
+-
+-| Parameter | Default | Notes |
+-|-----------|---------|-------|
+-| `--config` | `None` | YAML file containing `model` and `train` overrides. |
+-| `--manifest` | required | JSONL manifest produced by `prepare_manifest.py`. Each row must include `text` and `latent_path`; `speaker_id` and `caption` are optional depending on the model. |
+-| `--output-dir` | `outputs/irodori_tts` | Directory for checkpoints, trainer state, configs, and logs. |
+-| `--init-checkpoint` | `None` | Initializes model weights from a `.pt` or `.safetensors` checkpoint, then starts optimizer/scheduler state from scratch. |
+-| `--resume` | `None` | Restores full training state from a training checkpoint. Use `.pt` for full-model runs and checkpoint directories for LoRA runs. |
+-
+-Use `--init-checkpoint` for fine-tuning from released inference weights. Use `--resume`
+-only to continue an interrupted training run.
+-
+-### Model Config
+-
+-| Field | Notes |
+-|-------|-------|
+-| `latent_dim` | DACVAE latent dimension expected by the model. v2/v3 500M configs use `32`. |
+-| `latent_patch_size` | Number of latent frames grouped per model token. |
+-| `model_dim`, `num_layers`, `num_heads`, `mlp_ratio` | Main diffusion transformer width, depth, attention heads, and MLP expansion. |
+-| `text_tokenizer_repo`, `text_vocab_size`, `text_add_bos` | Tokenizer and vocabulary settings for the text encoder. |
+-| `text_dim`, `text_layers`, `text_heads`, `text_mlp_ratio` | Text encoder size. |
+-| `speaker_dim`, `speaker_layers`, `speaker_heads`, `speaker_patch_size`, `speaker_mlp_ratio` | Reference/speaker encoder size. Ignored when caption conditioning disables speaker conditioning. |
+-| `use_caption_condition` | Enables the VoiceDesign caption path and disables speaker/reference conditioning. |
+-| `caption_*` fields | Caption encoder tokenizer and architecture. When left unset, many fields inherit the corresponding text settings. |
+-| `timestep_embed_dim`, `adaln_rank`, `norm_eps` | Diffusion conditioning and normalization parameters. |
+-| `use_duration_predictor` | Enables v3 duration prediction. |
+-| `duration_*` fields | Duration predictor architecture, hidden size, depth, dropout, speaker conditioning, and token-sum initialization. |
+-
+-Architecture fields should match the checkpoint you initialize from. Changing dimensions,
+-layer counts, vocabulary sizes, or conditioning branches usually prevents checkpoint
+-loading unless you are intentionally training from scratch or using an upgrade path
+-handled by the code.
+-
+-### Batch Size, Length, and Masking
+-
+-| Parameter / Field | Default in dataclass | Notes |
+-|-------------------|----------------------|-------|
+-| `batch_size` / `--batch-size` | `8` | Per-process micro-batch size. In DDP, global batch size is multiplied by world size. |
+-| `gradient_accumulation_steps` / `--gradient-accumulation-steps` | `1` | Accumulates gradients over multiple micro-batches before optimizer update. |
+-| `max_text_len` / `--max-text-len` | `256` | Maximum token length for text conditioning. |
+-| `max_caption_len` / `--max-caption-len` | `None` | Maximum token length for caption conditioning; defaults to `max_text_len`. |
+-| `max_latent_steps` / `--max-latent-steps` | `750` | Maximum latent length loaded from each sample. At 25 fps, `750` is about 30 seconds. |
+-| `fixed_target_latent_steps` / `--fixed-target-latent-steps` | `750` | If set, all training targets are padded/truncated to this length. Set to `null` in YAML for variable-length training. |
+-| `fixed_target_full_mask` / `--fixed-target-full-mask` | `True` | For fixed-length training, includes padded tail positions in the loss mask. |
+-| `rf_loss_mode` / `--rf-loss-mode` | `echo` | RF loss normalization. `utterance_mean` averages per utterance and is used by v3 variable-length configs. |
+-
+-The v2 and current VoiceDesign configs use fixed 30-second targets. The v3 phase-1 body
+-and phase-2 duration configs set `fixed_target_latent_steps: null`,
+-`fixed_target_full_mask: false`, and `rf_loss_mode: utterance_mean` so samples can keep
+-their natural lengths.
+-
+-### Optimizer and Schedule
+-
+-| Parameter / Field | Default in dataclass | Notes |
+-|-------------------|----------------------|-------|
+-| `precision` / `--precision` | `bf16` | Forward-pass compute precision. Weights and optimizer states remain FP32. |
+-| `allow_tf32` / `--tf32` | `False` | Enables TF32 CUDA kernels for speed. |
+-| `compile_model` / `--compile-model` | `False` | Enables `torch.compile` during training. |
+-| `gradient_checkpointing` / `--gradient-checkpointing` | `False` | Enables activation checkpointing on diffusion blocks to reduce memory usage at the cost of extra compute. |
+-| `optimizer` / `--optimizer` | `muon` | `muon` or `adamw`. |
+-| `learning_rate` / `--lr` | `1e-4` | Base learning rate. |
+-| `weight_decay` / `--weight-decay` | `0.01` | Weight decay for optimizer groups that use it. |
+-| `adam_beta1`, `adam_beta2`, `adam_eps` | `0.9`, `0.999`, `1e-8` | AdamW hyperparameters. |
+-| `muon_momentum` / `--muon-momentum` | `0.95` | Momentum used by Muon. |
+-| `lr_scheduler` / `--lr-scheduler` | `none` | `none`, `cosine`, or `wsd`. |
+-| `warmup_steps` / `--warmup-steps` | `0` | Number of optimizer steps for LR warmup. |
+-| `stable_steps` / `--stable-steps` | `0` | Stable plateau length for the WSD schedule. |
+-| `min_lr_scale` / `--min-lr-scale` | `0.1` | Minimum LR multiplier at the end of decay. |
+-| `grad_clip_norm` | `1.0` | Gradient clipping norm. Currently configured through YAML. |
+-
+-The 500M example configs use `optimizer: muon` and `lr_scheduler: wsd`. When changing
+-effective batch size, revisit the learning rate and warmup length together.
+-
+-### Condition Dropout and Timesteps
+-
+-| Parameter / Field | Default in dataclass | Notes |
+-|-------------------|----------------------|-------|
+-| `text_condition_dropout` / `--text-condition-dropout` | `0.1` | Probability of replacing text conditioning with the null condition during training. |
+-| `caption_condition_dropout` / `--caption-condition-dropout` | `0.1` | Same idea for caption conditioning. |
+-| `speaker_condition_dropout` / `--speaker-condition-dropout` | `0.1` | Same idea for speaker/reference conditioning. |
+-| `timestep_stratified` / `--timestep-stratified` | `True` | Uses stratified logit-normal timestep sampling. |
+-| `timestep_logit_mean`, `timestep_logit_std` | `0.0`, `1.0` | Logit-normal timestep distribution parameters. |
+-| `timestep_min`, `timestep_max` | `0.001`, `0.999` | Lower and upper timestep sampling bounds. |
+-
+-Condition dropout is required for classifier-free guidance to work at inference time.
+-Very low dropout can weaken CFG behavior; very high dropout can reduce conditioning
+-quality.
+-
+-### VoiceDesign and Caption Warmup
+-
+-| Parameter / Field | Default in dataclass | Notes |
+-|-------------------|----------------------|-------|
+-| `use_caption_condition` | `False` | Model config field that enables caption conditioning and disables speaker/reference conditioning. |
+-| `caption_warmup` / `--caption-warmup` | `False` | During early training, updates only caption-only parameters. |
+-| `caption_warmup_steps` / `--caption-warmup-steps` | `0` | Number of optimizer steps for caption-only warmup. |
+-
+-`caption_warmup` is useful when adapting a base architecture to VoiceDesign because the
+-caption branch may need to catch up before normal joint training. `warmup_steps` still
+-controls the learning-rate scheduler; `caption_warmup_steps` controls which parameters
+-receive gradients during the caption warmup phase.
+-
+-The public VoiceDesign checkpoint is currently v2-based. Use the v2 VoiceDesign configs
+-for this path until a v3 VoiceDesign checkpoint is released.
+-
+-### Duration Predictor
+-
+-| Parameter / Field | Default in dataclass | Notes |
+-|-------------------|----------------------|-------|
+-| `use_duration_predictor` | `False` | Enables duration prediction in the model. |
+-| `train_mode` / `--train-mode` | `rf` | `rf` trains the RF model; `duration_only` freezes non-duration parameters and trains only the duration predictor. |
+-| `duration_loss_weight` / `--duration-loss-weight` | `0.1` | Weight of duration loss when training jointly with RF loss. |
+-| `duration_speaker_dropout` / `--duration-speaker-dropout` | `0.1` | Dropout for speaker features in duration prediction. |
+-| `duration_huber_delta` / `--duration-huber-delta` | `0.1` | Huber delta for the log-duration regression loss. |
+-| `duration_architecture` | `token_sum_adarn_zero_no_aux` | Duration predictor architecture. |
+-| `duration_hidden_dim`, `duration_layers`, `duration_dropout` | `1024`, `3`, `0.1` | Duration predictor residual SwiGLU width, depth, and dropout. |
+-| `duration_attention_heads` | `8` | Attention heads used by pooled duration variants. It is kept in config for shared DP construction; the token-sum phase2 config does not use pooling attention. |
+-| `duration_speaker_fusion` | `adarn_zero` | Speaker conditioning mode. `token_sum_adarn_zero_no_aux` requires `adarn_zero`. |
+-| `duration_token_init_frames` | `9.0` | Initial frames-per-token for token-sum duration heads. Initial predictions are roughly `valid_token_count * duration_token_init_frames`. |
+-| `duration_aux_dim` | `14` | Size of auxiliary duration features produced by the dataset pipeline. Token-sum no-aux models validate/pass this tensor for pipeline compatibility but do not use it in the prediction. |
+-
+-The duration target is `log1p(num_frames)` and the runtime converts predictions back to
+-latent frames for inference. The v3 base release uses this predictor as an integrated
+-part of inference. Use `duration_only` when you want to add or refine duration prediction
+-without updating the main RF model.
+-
+-The current v3 phase2 duration config uses a token contribution sum predictor after
+-ablation against pooled-vector speaker fusion variants. It keeps the encoded text sequence,
+-conditions residual SwiGLU blocks with speaker AdaRN-Zero, predicts a non-negative
+-per-token frame contribution with `softplus`, sums those contributions under the text
+-mask, and returns `log1p(total_frames)`.
+-
+-### LoRA Fine-Tuning
+-
+-| Parameter / Field | Default in dataclass | Notes |
+-|-------------------|----------------------|-------|
+-| `lora_enabled` / `--lora` | `False` | Enables PEFT LoRA fine-tuning. |
+-| `lora_r` / `--lora-r` | `16` | LoRA rank. Higher values increase trainable capacity and checkpoint size. |
+-| `lora_alpha` / `--lora-alpha` | `32` | LoRA scaling factor. |
+-| `lora_dropout` / `--lora-dropout` | `0.0` | Dropout inside LoRA layers. |
+-| `lora_bias` / `--lora-bias` | `none` | Bias handling passed to PEFT: `none`, `all`, or `lora_only`. |
+-| `lora_target_modules` / `--lora-target-modules` | `diffusion_attn` | Preset name, regex, or comma-separated module suffix list. |
+-| `lora_modules_to_save` / `--lora-modules-to-save` | `auto` | Extra modules saved with the adapter. `auto` saves `duration_predictor` for v3 duration-enabled models. Use `none` to disable. |
+-
+-For inference, pass the saved adapter directory to `infer.py --lora-adapter`.
+-Dynamic LoRA loading requires `--compile-model` to remain disabled.
+-
+-Common presets:
+-
+-- `diffusion_attn`: small, focused adaptation of diffusion attention.
+-- `diffusion_attn_mlp`: broader diffusion adaptation.
+-- `conditioning`: adapts conditioning projections.
+-- `all_attn_mlp`: broad adaptation across encoders and diffusion blocks.
+-- `all_linear`: largest preset; useful only when you intentionally want broad coverage.
+-
+-LoRA checkpoints are saved as adapter directories. During conversion, adapter weights are
+-merged into the base model so the exported `.safetensors` can be used directly for
+-inference.
++Speaker Inversion は、話者性を表す少数の token を学習して `.speaker.safetensors` として保存する機能です。推論時は参照音声の代わりに `--ref-embed` で読み込みます。
++
++| パラメータ | 既定値 | 説明 |
++| --- | --- | --- |
++| `--speaker-uncond-mode` | `mask` | `--ref-embed` 使用時の speaker CFG unconditional branch の作り方です。`mask` は低 VRAM、`noise` は embedding 標準偏差に合わせた Gaussian noise を使います。 |
++
++### Device、精度、compile
++
++| パラメータ | 既定値 | 説明 |
++| --- | --- | --- |
++| `--model-device` | auto | RF-DiT model の device です。例: `cuda`、`mps`、`cpu`。 |
++| `--codec-device` | auto | DACVAE encode/decode の device です。model と別 device でも構いません。 |
++| `--model-precision` | `fp32` | model compute precision です。`fp32` または `bf16`。 |
++| `--codec-precision` | `fp32` | codec compute precision です。`fp32` または `bf16`。 |
++| `--compile-model` | `False` | `torch.compile` を使います。初回は compile のため遅くなります。 |
++| `--compile-dynamic` | `False` | `torch.compile(dynamic=True)` を使います。 |
++| `--context-kv-cache` | `True` | text / speaker / caption の K/V projection を事前計算して sampling を高速化します。 |
++
++CUDA では、対応 GPU なら `bf16` がメモリ削減と速度向上に効く場合があります。CPU や MPS では `fp32` が安全です。
++
++### 末尾 trimming と timing
++
++| パラメータ | 既定値 | 説明 |
++| --- | --- | --- |
++| `--trim-tail` | `True` | 末尾のほぼ無音 latent 領域を heuristic で削除します。 |
++| `--tail-window-size` | `20` | tail trimming の window size です。 |
++| `--tail-std-threshold` | `0.05` | tail trimming の標準偏差 threshold です。 |
++| `--tail-mean-threshold` | `0.1` | tail trimming の平均 threshold です。 |
++| `--show-timings` | `True` | 主要な推論 stage の所要時間を表示します。 |
++
++Tail trimming は、固定 30 秒出力になりやすい v2 checkpoint で特に役立ちます。v3 Base では出力長が推定されるため重要度は下がります。有効な音声まで切られる場合は、まず `--trim-tail` を無効にしてください。
++
++## 学習パラメータ
++
++学習は YAML config の `model` と `train` section で設定します。CLI で指定した値は YAML より優先されます。
++
++### Data と checkpoint flow
++
++| パラメータ | 既定値 | 説明 |
++| --- | --- | --- |
++| `--config` | `None` | `model` と `train` の override を含む YAML file です。 |
++| `--manifest` | 必須 | `prepare_manifest.py` で作った JSONL manifest です。各行に `text` と `latent_path` が必要です。`speaker_id` と `caption` はモデルに応じて任意です。 |
++| `--output-dir` | `outputs/irodori_tts` | checkpoint、trainer state、config、log の保存先です。 |
++| `--init-checkpoint` | `None` | `.pt` または `.safetensors` から model weights を初期化します。optimizer / scheduler は新規開始です。 |
++| `--resume` | `None` | training checkpoint から学習状態を復元します。full-model は `.pt`、LoRA は checkpoint directory を使います。 |
++
++公開済み推論 weight から微調整する場合は `--init-checkpoint` を使います。中断した学習を続ける場合だけ `--resume` を使います。
++
++### Model config
++
++| field | 説明 |
++| --- | --- |
++| `latent_dim` | model が期待する DACVAE latent dimension です。v2/v3 500M config は `32` です。 |
++| `latent_patch_size` | model token 1 個にまとめる latent frame 数です。 |
++| `model_dim`, `num_layers`, `num_heads`, `mlp_ratio` | diffusion transformer の幅、深さ、attention head 数、MLP expansion です。 |
++| `text_tokenizer_repo`, `text_vocab_size`, `text_add_bos` | text encoder の tokenizer と vocabulary 設定です。 |
++| `text_dim`, `text_layers`, `text_heads`, `text_mlp_ratio` | text encoder のサイズです。 |
++| `speaker_dim`, `speaker_layers`, `speaker_heads`, `speaker_patch_size`, `speaker_mlp_ratio` | reference/speaker encoder のサイズです。caption conditioning で speaker conditioning を無効にする場合は使われません。 |
++| `use_caption_condition` | VoiceDesign の caption path を有効にし、speaker/reference conditioning を無効にします。 |
++| `caption_*` | caption encoder の tokenizer と architecture 設定です。未指定の場合、多くの値は text 側から引き継がれます。 |
++| `timestep_embed_dim`, `adaln_rank`, `norm_eps` | diffusion conditioning と normalization の設定です。 |
++| `use_duration_predictor` | v3 duration prediction を有効にします。 |
++| `duration_*` | duration predictor の architecture、hidden size、depth、dropout、speaker conditioning、token-sum 初期化などです。 |
++
++既存 checkpoint を読み込む場合、architecture 関連 field は checkpoint と一致させてください。dimension、layer 数、vocabulary size、conditioning branch を変えると、通常は checkpoint を読み込めません。
++
++### Batch size、長さ、mask
++
++| パラメータ / field | dataclass 既定値 | 説明 |
++| --- | --- | --- |
++| `batch_size` / `--batch-size` | `8` | process ごとの micro-batch size です。DDP では world size 分だけ global batch が増えます。 |
++| `gradient_accumulation_steps` / `--gradient-accumulation-steps` | `1` | optimizer update 前に gradient を蓄積する step 数です。 |
++| `max_text_len` / `--max-text-len` | `256` | text conditioning の最大 token 長です。 |
++| `max_caption_len` / `--max-caption-len` | `None` | caption conditioning の最大 token 長です。未指定なら `max_text_len` を使います。 |
++| `max_latent_steps` / `--max-latent-steps` | `750` | sample から読み込む最大 latent 長です。25 fps では `750` が約 30 秒です。 |
++| `fixed_target_latent_steps` / `--fixed-target-latent-steps` | `750` | 指定すると training target をこの長さへ pad/truncate します。可変長学習では YAML で `null` にします。 |
++| `fixed_target_full_mask` / `--fixed-target-full-mask` | `True` | 固定長学習で pad tail も loss mask に含めます。 |
++| `rf_loss_mode` / `--rf-loss-mode` | `echo` | RF loss の正規化方式です。v3 可変長 config では `utterance_mean` を使います。 |
++
++v2 と現在の VoiceDesign config は 30 秒固定 target を使います。v3 phase1/phase2 config は `fixed_target_latent_steps: null`、`fixed_target_full_mask: false`、`rf_loss_mode: utterance_mean` で自然な長さを保ちます。
++
++### Optimizer と schedule
++
++| パラメータ / field | dataclass 既定値 | 説明 |
++| --- | --- | --- |
++| `precision` / `--precision` | `bf16` | forward-pass の compute precision です。weight と optimizer state は FP32 のままです。 |
++| `allow_tf32` / `--tf32` | `False` | CUDA の TF32 kernel を有効にします。 |
++| `compile_model` / `--compile-model` | `False` | 学習時に `torch.compile` を使います。 |
++| `gradient_checkpointing` / `--gradient-checkpointing` | `False` | activation checkpointing を有効にして VRAM を削減します。計算量は増えます。 |
++| `optimizer` / `--optimizer` | `muon` | `muon` または `adamw`。 |
++| `learning_rate` / `--lr` | `1e-4` | 基本 learning rate です。 |
++| `weight_decay` / `--weight-decay` | `0.01` | 対象 optimizer group の weight decay です。 |
++| `adam_beta1`, `adam_beta2`, `adam_eps` | `0.9`, `0.999`, `1e-8` | AdamW の hyperparameter です。 |
++| `muon_momentum` / `--muon-momentum` | `0.95` | Muon の momentum です。 |
++| `lr_scheduler` / `--lr-scheduler` | `none` | `none`、`cosine`、`wsd`。 |
++| `warmup_steps` / `--warmup-steps` | `0` | LR warmup の optimizer step 数です。 |
++| `stable_steps` / `--stable-steps` | `0` | WSD schedule の stable plateau 長です。 |
++| `min_lr_scale` / `--min-lr-scale` | `0.1` | decay 終了時の最小 LR 倍率です。 |
++| `grad_clip_norm` | `1.0` | gradient clipping norm です。現在は YAML で設定します。 |
++
++500M example config は `optimizer: muon` と `lr_scheduler: wsd` を使います。effective batch size を変えた場合は、learning rate と warmup length も一緒に見直してください。
++
++### Condition dropout と timestep
++
++| パラメータ / field | dataclass 既定値 | 説明 |
++| --- | --- | --- |
++| `text_condition_dropout` / `--text-condition-dropout` | `0.1` | text condition を null condition に置き換える確率です。 |
++| `caption_condition_dropout` / `--caption-condition-dropout` | `0.1` | caption condition 用の dropout です。 |
++| `speaker_condition_dropout` / `--speaker-condition-dropout` | `0.1` | speaker/reference condition 用の dropout です。 |
++| `timestep_stratified` / `--timestep-stratified` | `True` | stratified logit-normal timestep sampling を使います。 |
++| `timestep_logit_mean`, `timestep_logit_std` | `0.0`, `1.0` | logit-normal timestep distribution の parameter です。 |
++| `timestep_min`, `timestep_max` | `0.001`, `0.999` | timestep sampling の下限と上限です。 |
++
++Condition dropout は、推論時の classifier-free guidance を成立させるために必要です。小さすぎると CFG が弱くなり、大きすぎると条件への追従が弱くなります。
++
++### VoiceDesign と caption warmup
++
++| パラメータ / field | dataclass 既定値 | 説明 |
++| --- | --- | --- |
++| `use_caption_condition` | `False` | caption conditioning を有効にし、speaker/reference conditioning を無効にします。 |
++| `caption_warmup` / `--caption-warmup` | `False` | 学習初期に caption 専用 parameter だけを更新します。 |
++| `caption_warmup_steps` / `--caption-warmup-steps` | `0` | caption-only warmup の optimizer step 数です。 |
++
++`caption_warmup` は、Base architecture を VoiceDesign へ適応させるときに caption branch を先に慣らす目的で使います。`warmup_steps` は LR scheduler、`caption_warmup_steps` は gradient を流す parameter の切り替えを制御します。
++
++### Duration predictor
++
++| パラメータ / field | dataclass 既定値 | 説明 |
++| --- | --- | --- |
++| `use_duration_predictor` | `False` | duration prediction を有効にします。 |
++| `train_mode` / `--train-mode` | `rf` | `rf` は RF model を学習します。`duration_only` は duration predictor だけを学習します。 |
++| `duration_loss_weight` / `--duration-loss-weight` | `0.1` | RF loss と同時に duration loss を使う場合の weight です。 |
++| `duration_speaker_dropout` / `--duration-speaker-dropout` | `0.1` | duration prediction における speaker feature dropout です。 |
++| `duration_huber_delta` / `--duration-huber-delta` | `0.1` | log-duration regression loss の Huber delta です。 |
++| `duration_architecture` | `token_sum_adarn_zero_no_aux` | duration predictor architecture です。 |
++| `duration_hidden_dim`, `duration_layers`, `duration_dropout` | `1024`, `3`, `0.1` | duration predictor residual SwiGLU の幅、深さ、dropout です。 |
++| `duration_attention_heads` | `8` | pooled duration variant 用の attention head 数です。token-sum phase2 config では pooling attention は使いません。 |
++| `duration_speaker_fusion` | `adarn_zero` | speaker conditioning 方式です。`token_sum_adarn_zero_no_aux` では `adarn_zero` が必要です。 |
++| `duration_token_init_frames` | `9.0` | token-sum duration head の初期 frames-per-token です。初期予測はおおよそ `valid_token_count * duration_token_init_frames` です。 |
++| `duration_aux_dim` | `14` | dataset pipeline が作る補助 duration feature の次元です。token-sum no-aux model では互換性確認のため受け取りますが、予測には使いません。 |
++
++duration target は `log1p(num_frames)` です。推論時には latent frame 数へ戻して使います。v3 Base release では duration predictor が推論の一部として統合されています。
++
++### LoRA 微調整
++
++| パラメータ / field | dataclass 既定値 | 説明 |
++| --- | --- | --- |
++| `lora_enabled` / `--lora` | `False` | PEFT LoRA 微調整を有効にします。 |
++| `lora_r` / `--lora-r` | `16` | LoRA rank です。大きいほど表現力と checkpoint size が増えます。 |
++| `lora_alpha` / `--lora-alpha` | `32` | LoRA scaling factor です。 |
++| `lora_dropout` / `--lora-dropout` | `0.0` | LoRA layer 内の dropout です。 |
++| `lora_bias` / `--lora-bias` | `none` | PEFT に渡す bias 設定です。`none`、`all`、`lora_only`。 |
++| `lora_target_modules` / `--lora-target-modules` | `diffusion_attn` | preset 名、regex、または comma-separated module suffix list です。 |
++| `lora_modules_to_save` / `--lora-modules-to-save` | `auto` | adapter と一緒に保存する追加 module です。`auto` では v3 duration-enabled model の `duration_predictor` を保存します。`none` で無効です。 |
++
++推論時は adapter directory を `infer.py --lora-adapter` に渡します。dynamic LoRA loading を使う場合は `--compile-model` を無効にしてください。
++
++主な preset:
++
++- `diffusion_attn`: diffusion attention を中心にした小さめの適応。
++- `diffusion_attn_mlp`: diffusion 側を広めに適応。
++- `conditioning`: conditioning projection を適応。
++- `all_attn_mlp`: encoder と diffusion block を広く適応。
++- `all_linear`: 最も広い preset。意図的に広範囲を学習したい場合向けです。
++
++LoRA checkpoint は adapter directory として保存されます。変換時には adapter weight が base model に merge され、推論用 `.safetensors` として出力されます。
++
++### Speaker Inversion 学習
++
++Speaker Inversion は、モデル全体を凍結して話者 embedding token だけを学習します。出力される `.speaker.safetensors` は推論時に `--ref-embed` で使います。
++
++| パラメータ / field | dataclass 既定値 | 説明 |
++| --- | --- | --- |
++| `speaker_inversion_enabled` / `--speaker-inversion` | `False` | Speaker Inversion mode を有効にします。model parameter は全て凍結され、speaker embedding token だけが学習されます。 |
++| `speaker_inversion_tokens` / `--speaker-inversion-tokens` | `16` | 学習する speaker embedding token 数です。 |
++| `speaker_inversion_init_std` / `--speaker-inversion-init-std` | `0.02` | embedding token の random initialization 標準偏差です。 |
++| `speaker_inversion_init_embedding` / `--speaker-inversion-init-embedding` | `None` | 既存 `.speaker.safetensors` から再開、または warm-start する場合のパスです。 |
++
++Base model weight を `--init-checkpoint` で渡し、対象話者の音声から作った manifest を `--manifest` に渡します。embedding に話者を集中して覚えさせるため、condition dropout はすべて `0.0` にするのが基本です。
++
++### Logging、Validation、DDP
++
++| パラメータ / field | dataclass 既定値 | 説明 |
++| --- | --- | --- |
++| `log_every` / `--log-every` | `100` | optimizer step 単位の logging interval です。 |
++| `save_every` / `--save-every` | `1000` | optimizer step 単位の checkpoint 保存 interval です。 |
++| `checkpoint_best_n` / `--checkpoint-best-n` | `0` | validation 有効時は best checkpoint 数、無効時は periodic checkpoint 数の制限として使います。 |
++| `valid_ratio` / `--valid-ratio` | `0.0` | manifest の一部を validation に分割する比率です。 |
++| `valid_every` / `--valid-every` | `0` | validation interval です。`<=0` で無効です。 |
++| `wandb_enabled` / `--wandb` | `False` | Weights & Biases logging を有効にします。 |
++| `wandb_project`, `wandb_entity`, `wandb_run_name`, `wandb_mode` | varies | W&B の run metadata と mode です。 |
++| `ddp_find_unused_parameters` / `--ddp-find-unused-parameters` | `False` | conditional branch がある場合の DDP unused-parameter detection を有効にします。 |
++| `progress` / `--progress` | `True` | tqdm progress bar を表示します。 |
++| `progress_all_ranks` / `--progress-all` | `False` | DDP の全 rank で progress bar を表示します。 |
++| `seed` / `--seed` | `0` | 学習 setup と data split に使う random seed です。 |
++
++multi-GPU 学習は次のように起動します。
+ 
+-### Speaker Inversion
++```bash
++uv run torchrun --nproc_per_node N train.py ...
++```
++
++`batch_size` は process ごとの値です。effective global batch size は `batch_size * gradient_accumulation_steps * world_size` です。
++
++## Manifest 作成パラメータ
++
++`prepare_manifest.py` は dataset の音声を DACVAE latent へ encode し、`train.py` が読む JSONL manifest を作成します。
++
++| パラメータ | 既定値 | 説明 |
++| --- | --- | --- |
++| `--dataset` | 必須 | Hugging Face dataset 名、または `datasets.load_dataset` が受け付けるローカル dataset script/path です。 |
++| `--config` | `None` | dataset config / subset です。 |
++| `--split` | `train` | 読み込む dataset split です。 |
++| `--data-files` | `None` | 任意の data file path、glob、または split-qualified entry です。 |
++| `--audio-column` | 必須 | 音声が入っている column 名です。 |
++| `--text-column` | 必須 | transcript text が入っている column 名です。 |
++| `--text-normalize` | `True` | manifest に書き出す前に Irodori-TTS の text normalization を適用します。 |
++| `--caption-column` | `None` | style caption column です。manifest には `caption` として書き込まれます。 |
++| `--speaker-column` | `None` | speaker/source column です。複数回指定、または comma-separated 指定ができます。 |
++| `--speaker-id-prefix` | dataset name | 生成される `speaker_id` の namespace prefix です。 |
++| `--output-manifest` | 必須 | 出力 JSONL path です。 |
++| `--latent-dir` | 必須 | `.pt` latent file の保存先 directory です。 |
++| `--normalize-db` | `-16.0` | codec encode 前の loudness normalization です。`none` で無効化します。 |
++| `--target-sample-rate` | `None` | 任意の decode sample rate です。 |
++| `--min-sample-rate` | `0` | decode sample の sample rate がこの値未満なら skip します。 |
++| `--max-seconds` | `None` | encode 前に source audio を trim します。 |
++| `--max-samples` | `None` | rank ごとに書き出す accepted sample の最大数です。 |
++| `--num-gpus` | `None` | GPU ごとに process を起動する local multiprocessing を使います。 |
++| `--shard-strategy` | `auto` | multiprocessing 時の sample sharding strategy です。 |
++| `--merge-output` | `False` | multi-GPU preprocessing 後に per-rank manifest shard を merge します。 |
++| `--streaming` | `False` | dataset を streaming mode で読み込みます。 |
++
++speaker-conditioned training では安定した `speaker_id` を含めてください。VoiceDesign training では `caption` を含めます。`use_caption_condition: true` の場合、speaker/reference branch は無効になるため `speaker_id` は必須ではありません。
++
++## 症状別レシピ
++
++### テキストの読み間違い、追従が弱い
++
++まず `--num-steps 40` を基準にします。読みや発音が弱い場合は `--cfg-scale-text` を少し上げます。ノイズや硬さが増えた場合は、scale を戻してください。
++
++### 参照音声への類似度を上げたい
++
++参照音声を短く、明瞭にし、`--ref-normalize-db` は有効のままにします。その上で `--cfg-scale-speaker` を少し上げます。まだ弱い場合は、控えめな `--speaker-kv-scale` を試します。
++
++### VoiceDesign の声が安定しない
++
++`--caption` の先頭で、性別と声の高さを明確に書きます。例: 「成人男性の低めの声」「若い成人女性の明るい声」。気に入った声が出たら `--seed` を固定します。
++
++### 声は似ているが硬い、感情が乗らない
++
++参照音声ありの Base model では `--cfg-scale-speaker` を少し下げます。それでも読みや感情が弱い場合は `--cfg-scale-text` を少し上げます。
++
++### 推論を速くしたい
++
++`--num-steps` を下げます。`--context-kv-cache` は有効のままにし、VRAM に余裕があれば `--decode-mode batch` を試します。CUDA GPU が対応していれば `--model-precision bf16` と `--codec-precision bf16` も候補です。同じ長さの request を大量に処理する場合は `--compile-model` が役立つことがあります。
++
++### VRAM を抑えたい
++
++`--decode-mode sequential`、`--num-candidates 1` を使います。大きな `--seconds` や候補数の増加は避けます。device によっては `bf16` より `fp32` の方が安定する場合もあります。
++
++### 公開 weight を微調整したい
+ 
+-Speaker Inversion freezes the entire model and trains only a small set of learned speaker
+-embedding tokens. The output is a `.speaker.safetensors` file used at inference with
+-`--ref-embed`. An example config is provided at
+-`configs/train_500m_v3_speaker_inversion.yaml`.
+-
+-| Parameter / Field | Default in dataclass | Notes |
+-|-------------------|----------------------|-------|
+-| `speaker_inversion_enabled` / `--speaker-inversion` | `False` | Enables Speaker Inversion mode. All model parameters are frozen; only the speaker embedding tokens receive gradients. |
+-| `speaker_inversion_tokens` / `--speaker-inversion-tokens` | `16` | Number of learned speaker embedding tokens. |
+-| `speaker_inversion_init_std` / `--speaker-inversion-init-std` | `0.02` | Standard deviation for random initialization of the embedding tokens. |
+-| `speaker_inversion_init_embedding` / `--speaker-inversion-init-embedding` | `None` | Path to an existing `.speaker.safetensors` to resume from or warm-start a new optimization. |
+-
+-Use `--init-checkpoint` with the base model weights and `--manifest` with audio from the
+-target speaker. All condition dropout values should be set to `0.0` so the embedding
+-learns to represent the target speaker unconditionally.
+-
+-### Logging, Validation, and DDP
+-
+-| Parameter / Field | Default in dataclass | Notes |
+-|-------------------|----------------------|-------|
+-| `log_every` / `--log-every` | `100` | Logging interval in optimizer steps. |
+-| `save_every` / `--save-every` | `1000` | Checkpoint interval in optimizer steps. |
+-| `checkpoint_best_n` / `--checkpoint-best-n` | `0` | Keeps best validation checkpoints when validation is enabled; otherwise limits periodic checkpoint count. |
+-| `valid_ratio` / `--valid-ratio` | `0.0` | Splits a ratio of the manifest for validation. |
+-| `valid_every` / `--valid-every` | `0` | Validation interval. Set `<=0` to disable validation. |
+-| `wandb_enabled` / `--wandb` | `False` | Enables Weights & Biases logging. |
+-| `wandb_project`, `wandb_entity`, `wandb_run_name`, `wandb_mode` | varies | W&B run metadata and mode. |
+-| `ddp_find_unused_parameters` / `--ddp-find-unused-parameters` | `False` | Enables DDP unused-parameter detection for conditional branches. |
+-| `progress` / `--progress` | `True` | Enables tqdm progress bars. |
+-| `progress_all_ranks` / `--progress-all` | `False` | Shows progress bars for all DDP ranks. |
+-| `seed` / `--seed` | `0` | Random seed for training setup and data split behavior. |
+-
+-For multi-GPU training, launch with `uv run torchrun --nproc_per_node N train.py ...`.
+-The configured `batch_size` is per process, so the effective global batch size is
+-`batch_size * gradient_accumulation_steps * world_size`.
+-
+-## Manifest Preparation Parameters
+-
+-`prepare_manifest.py` encodes dataset audio into DACVAE latents and writes a JSONL
+-manifest consumed by `train.py`.
+-
+-| Parameter | Default | Notes |
+-|-----------|---------|-------|
+-| `--dataset` | required | Hugging Face dataset name or local dataset script/path accepted by `datasets.load_dataset`. |
+-| `--config` | `None` | Dataset config/subset. |
+-| `--split` | `train` | Dataset split to read. |
+-| `--data-files` | `None` | Optional data file paths/globs or split-qualified entries. |
+-| `--audio-column` | required | Column containing audio. |
+-| `--text-column` | required | Column containing transcript text. |
+-| `--text-normalize` | `True` | Applies Irodori-TTS text normalization before writing manifest text. |
+-| `--caption-column` | `None` | Optional style caption column. Written as `caption` in the manifest. |
+-| `--speaker-column` | `None` | Optional speaker/source column. Can be specified multiple times or as comma-separated names. |
+-| `--speaker-id-prefix` | dataset name | Namespace prefix for generated `speaker_id` values. |
+-| `--output-manifest` | required | Output JSONL path. |
+-| `--latent-dir` | required | Directory where `.pt` latent files are written. |
+-| `--normalize-db` | `-16.0` | Loudness normalization before codec encode. Use `none` to disable. |
+-| `--target-sample-rate` | `None` | Optional decode sample rate. |
+-| `--min-sample-rate` | `0` | Skips decoded samples below this sample rate. |
+-| `--max-seconds` | `None` | Trims source audio before encode. |
+-| `--max-samples` | `None` | Maximum number of accepted samples to write per rank. |
+-| `--num-gpus` | `None` | Spawns local multiprocessing with one process per GPU. |
+-| `--shard-strategy` | `auto` | Sample sharding strategy for multiprocessing. |
+-| `--merge-output` | `False` | Merges per-rank manifest shards after multi-GPU preprocessing. |
+-| `--streaming` | `False` | Loads the dataset in streaming mode. |
+-
+-For speaker-conditioned training, include a stable `speaker_id`. For VoiceDesign
+-training, include `caption`; `speaker_id` is optional because the model disables the
+-speaker/reference branch when `use_caption_condition: true`.
+-
+-## Tuning Recipes
+-
+-### Better Text Adherence
+-
+-Start with the default `--num-steps 40`. If pronunciation or text following is weak,
+-try a slightly higher `--cfg-scale-text`. If artifacts increase, back off the scale
+-before increasing other guidance values.
+-
+-### Stronger Speaker Similarity
+-
+-Use clean reference audio and keep `--ref-normalize-db` enabled. Then try increasing
+-`--cfg-scale-speaker` modestly. If that is not enough, test a moderate
+-`--speaker-kv-scale` with the default `--speaker-kv-min-t 0.9`.
+-
+-### Faster Inference
+-
+-Reduce `--num-steps`, keep `--context-kv-cache` enabled, and use `--decode-mode batch`
+-when VRAM allows. On supported CUDA GPUs, try `--model-precision bf16` and
+-`--codec-precision bf16`. Use `--compile-model` when serving many requests with similar
+-lengths.
+-
+-### Lower VRAM Inference
+-
+-Use `--decode-mode sequential`, keep `--num-candidates 1`, and prefer `fp32`/`bf16`
+-settings that are stable on your device. Avoid large `--seconds` values and high
+-candidate counts.
+-
+-### Fine-Tuning Released Weights
+-
+-Use `--init-checkpoint` with the released `.safetensors`, choose the closest YAML config,
+-and start with LoRA unless you intentionally need full-model updates. For small datasets,
+-keep validation enabled with a small `valid_ratio` and monitor overfitting.
++公開 `.safetensors` を `--init-checkpoint` に指定し、近い YAML config を選びます。小規模 dataset ではまず LoRA から始めるのが扱いやすいです。`valid_ratio` を少し設定して overfitting を確認してください。
+diff --git a/gradio_app.py b/gradio_app.py
+index 194b10f..8f6d1c8 100644
+--- a/gradio_app.py
++++ b/gradio_app.py
+@@ -8,6 +8,14 @@ from pathlib import Path
+ import gradio as gr
+ from huggingface_hub import hf_hub_download
+ 
++from irodori_tts.audio_editor import (
++    apply_insert_edit,
++    apply_range_edit,
++    audio_duration_seconds,
++    redo_edit,
++    resolve_audio_path,
++    undo_edit,
++)
+ from irodori_tts.gradio_emoji_palette import EMOJI_PALETTE_CSS, build_emoji_palette
+ from irodori_tts.inference_runtime import (
+     RuntimeKey,
+@@ -19,6 +27,12 @@ from irodori_tts.inference_runtime import (
+     list_available_runtime_precisions,
+     save_wav,
+ )
++from irodori_tts.offline_paths import (
++    BASE_MODEL_REPO,
++    CODEC_REPO,
++    resolve_checkpoint_reference,
++    resolve_model_reference,
++)
+ from irodori_tts.speaker_inversion import is_speaker_inversion_safetensors_path
+ 
+ MAX_GRADIO_CANDIDATES = 32
+@@ -37,7 +51,7 @@ def _default_checkpoint() -> str:
+         ]
+     )
+     if not candidates:
+-        return "Aratako/Irodori-TTS-500M-v3"
++        return resolve_checkpoint_reference(BASE_MODEL_REPO)
+     return str(candidates[-1])
+ 
+ 
+@@ -154,7 +168,15 @@ def _resolve_checkpoint_path(raw_checkpoint: str) -> str:
+ 
+     suffix = Path(checkpoint).suffix.lower()
+     if suffix in {".pt", ".safetensors"}:
+-        return checkpoint
++        return resolve_checkpoint_reference(checkpoint)
++
++    local_checkpoint = resolve_checkpoint_reference(checkpoint)
++    if Path(local_checkpoint).is_file():
++        print(
++            f"[gradio] checkpoint: bundled hf://{checkpoint} -> {local_checkpoint}",
++            flush=True,
++        )
++        return str(local_checkpoint)
+ 
+     resolved = hf_hub_download(repo_id=checkpoint, filename="model.safetensors")
+     print(f"[gradio] checkpoint: hf://{checkpoint} -> {resolved}", flush=True)
+@@ -172,7 +194,7 @@ def _build_runtime_key(
+     return RuntimeKey(
+         checkpoint=checkpoint_path,
+         model_device=str(model_device),
+-        codec_repo="Aratako/Semantic-DACVAE-Japanese-32dim",
++        codec_repo=resolve_model_reference(CODEC_REPO),
+         model_precision=str(model_precision),
+         codec_device=str(codec_device),
+         codec_precision=str(codec_precision),
+@@ -197,9 +219,9 @@ def _load_model(
+     )
+     _, reloaded = get_cached_runtime(runtime_key)
+     if reloaded:
+-        status = "loaded model into memory"
++        status = "モデルをメモリに読み込みました"
+     else:
+-        status = "model already loaded; reused existing runtime"
++        status = "モデルは読み込み済みです。既存のランタイムを再利用しました"
+     return (
+         f"{status}\n"
+         f"checkpoint: {runtime_key.checkpoint}\n"
+@@ -376,12 +398,119 @@ def _run_generation(
+             audio_updates.append(gr.update(value=out_paths[i], visible=True))
+         else:
+             audio_updates.append(gr.update(value=None, visible=False))
+-    return (*audio_updates, detail_text, timing_text)
++    editor_audio = out_paths[0] if out_paths else None
++    return (*audio_updates, detail_text, timing_text, *_load_editor_audio(editor_audio))
++
++
++def _selection_updates(duration: float, *, full_range: bool) -> tuple[object, object]:
++    maximum = max(float(duration), 0.001)
++    start_value = 0.0
++    end_value = maximum if full_range else min(1.0, maximum)
++    return (
++        gr.update(maximum=maximum, value=start_value),
++        gr.update(maximum=maximum, value=end_value),
++    )
++
++
++def _insert_point_update(duration: float) -> object:
++    return gr.update(maximum=max(float(duration), 0.001), value=0.0)
++
++
++def _load_editor_audio(source_audio: object) -> tuple[object, list[str], list[str], str, object, object, object]:
++    if source_audio is None:
++        start_update, end_update = _selection_updates(1.0, full_range=False)
++        return None, [], [], "音声が読み込まれていません。", start_update, end_update, _insert_point_update(1.0)
++    path = resolve_audio_path(source_audio)
++    duration = audio_duration_seconds(path)
++    start_update, end_update = _selection_updates(duration, full_range=True)
++    return (
++        path,
++        [path],
++        [],
++        f"読み込みました: {path}\n長さ: {duration:.3f}秒",
++        start_update,
++        end_update,
++        _insert_point_update(duration),
++    )
++
++
++def _apply_editor_range(
++    source_audio: object,
++    start_seconds: float,
++    end_seconds: float,
++    history: list[str] | None,
++    operation: str,
++) -> tuple[str, str, list[str], list[str], object, object, object]:
++    path, status, new_history, redo_stack = apply_range_edit(
++        source_audio,
++        start_seconds,
++        end_seconds,
++        operation,
++        history,
++    )
++    duration = audio_duration_seconds(path)
++    start_update, end_update = _selection_updates(duration, full_range=True)
++    return path, status, new_history, redo_stack, start_update, end_update, _insert_point_update(duration)
++
++
++def _trim_editor_audio(
++    source_audio: object,
++    start_seconds: float,
++    end_seconds: float,
++    history: list[str] | None,
++) -> tuple[str, str, list[str], list[str], object, object, object]:
++    return _apply_editor_range(source_audio, start_seconds, end_seconds, history, "trim")
++
++
++def _cut_editor_audio(
++    source_audio: object,
++    start_seconds: float,
++    end_seconds: float,
++    history: list[str] | None,
++) -> tuple[str, str, list[str], list[str], object, object, object]:
++    return _apply_editor_range(source_audio, start_seconds, end_seconds, history, "cut")
++
++
++def _insert_editor_audio(
++    source_audio: object,
++    insert_audio: object,
++    insert_at_seconds: float,
++    history: list[str] | None,
++) -> tuple[str, str, list[str], list[str], object, object, object]:
++    path, status, new_history, redo_stack = apply_insert_edit(
++        source_audio,
++        insert_audio,
++        insert_at_seconds,
++        history,
++    )
++    duration = audio_duration_seconds(path)
++    start_update, end_update = _selection_updates(duration, full_range=True)
++    return path, status, new_history, redo_stack, start_update, end_update, _insert_point_update(duration)
++
++
++def _undo_editor_audio(
++    history: list[str] | None,
++    redo_stack: list[str] | None,
++) -> tuple[str, str, list[str], list[str], object, object, object]:
++    path, status, new_history, new_redo = undo_edit(history, redo_stack)
++    duration = audio_duration_seconds(path) if path else 1.0
++    start_update, end_update = _selection_updates(duration, full_range=True)
++    return path, status, new_history, new_redo, start_update, end_update, _insert_point_update(duration)
++
++
++def _redo_editor_audio(
++    history: list[str] | None,
++    redo_stack: list[str] | None,
++) -> tuple[str, str, list[str], list[str], object, object, object]:
++    path, status, new_history, new_redo = redo_edit(history, redo_stack)
++    duration = audio_duration_seconds(path) if path else 1.0
++    start_update, end_update = _selection_updates(duration, full_range=True)
++    return path, status, new_history, new_redo, start_update, end_update, _insert_point_update(duration)
+ 
+ 
+ def _clear_runtime_cache() -> str:
+     clear_cached_runtime()
+-    return "cleared loaded model from memory"
++    return "読み込み済みモデルをメモリから解放しました"
+ 
+ 
+ def build_ui() -> gr.Blocks:
+@@ -392,89 +521,89 @@ def build_ui() -> gr.Blocks:
+     model_precision_choices = _precision_choices_for_device(default_model_device)
+     codec_precision_choices = _precision_choices_for_device(default_codec_device)
+ 
+-    with gr.Blocks(title="Irodori-TTS Gradio") as demo:
+-        gr.Markdown("# Irodori-TTS Inference (Cached Runtime)")
++    with gr.Blocks(title="Irodori-TTS 音声生成") as demo:
++        gr.Markdown("# Irodori-TTS 音声生成")
+         gr.Markdown(
+-            "When settings are unchanged, runtime is reused and only sampling/decoding runs."
++            "同じ設定で続けて生成する場合、読み込み済みモデルを再利用します。"
+         )
+ 
+         with gr.Row():
+             checkpoint = gr.Textbox(
+-                label="Checkpoint (.pt/.safetensors or HF repo id)",
++                label="チェックポイント（.pt/.safetensors または HF repo id）",
+                 value=default_checkpoint,
+                 scale=4,
+             )
+             model_device = gr.Dropdown(
+-                label="Model Device",
++                label="モデルのデバイス",
+                 choices=device_choices,
+                 value=default_model_device,
+                 scale=1,
+             )
+             model_precision = gr.Dropdown(
+-                label="Model Precision",
++                label="モデルの精度",
+                 choices=model_precision_choices,
+                 value=model_precision_choices[0],
+                 scale=1,
+             )
+             codec_device = gr.Dropdown(
+-                label="Codec Device",
++                label="コーデックのデバイス",
+                 choices=device_choices,
+                 value=default_codec_device,
+                 scale=1,
+             )
+             codec_precision = gr.Dropdown(
+-                label="Codec Precision",
++                label="コーデックの精度",
+                 choices=codec_precision_choices,
+                 value=codec_precision_choices[0],
+                 scale=1,
+             )
+ 
+         with gr.Row():
+-            load_model_btn = gr.Button("Load Model")
+-            clear_cache_btn = gr.Button("Unload Model")
+-            clear_cache_msg = gr.Textbox(label="Model Status", interactive=False)
++            load_model_btn = gr.Button("モデル読込")
++            clear_cache_btn = gr.Button("モデル解放")
++            clear_cache_msg = gr.Textbox(label="モデル状態", interactive=False)
+ 
+         with gr.Column():
+             text = gr.Textbox(
+-                label="Text",
++                label="テキスト",
+                 lines=6,
+                 elem_id="irodori-text-input",
+             )
+             build_emoji_palette(text, open=False)
+         with gr.Tabs():
+-            with gr.Tab("Reference Audio"):
++            with gr.Tab("参照音声"):
+                 uploaded_audio = gr.Audio(
+-                    label="Reference Audio Upload (optional)",
++                    label="参照音声アップロード（任意）",
+                     type="filepath",
+                 )
+-            with gr.Tab("Speaker Embedding"):
++            with gr.Tab("話者埋め込み"):
+                 with gr.Row():
+                     uploaded_speaker_embedding = gr.File(
+-                        label="Speaker Embedding Upload (.speaker.safetensors, optional)",
++                        label="話者埋め込みアップロード（.speaker.safetensors、任意）",
+                         type="filepath",
+                         file_count="single",
+                         scale=1,
+                     )
+                     speaker_embedding_path_raw = gr.Textbox(
+-                        label="Speaker Embedding Path (.speaker.safetensors, optional)",
++                        label="話者埋め込みパス（.speaker.safetensors、任意）",
+                         value="",
+                         scale=1,
+                     )
+ 
+-        with gr.Accordion("Sampling", open=True):
++        with gr.Accordion("生成設定", open=True):
+             with gr.Row():
+-                num_steps = gr.Slider(label="Num Steps", minimum=1, maximum=120, value=40, step=1)
++                num_steps = gr.Slider(label="ステップ数", minimum=1, maximum=120, value=40, step=1)
+                 num_candidates = gr.Slider(
+-                    label="Num Candidates",
++                    label="候補数",
+                     minimum=1,
+                     maximum=MAX_GRADIO_CANDIDATES,
+                     value=1,
+                     step=1,
+                 )
+-                seed_raw = gr.Textbox(label="Seed (blank=random)", value="")
+-                seconds_raw = gr.Textbox(label="Seconds (blank=auto)", value="")
++                seed_raw = gr.Textbox(label="シード（空欄=ランダム）", value="")
++                seconds_raw = gr.Textbox(label="秒数（空欄=自動）", value="")
+                 duration_scale = gr.Slider(
+-                    label="Duration Scale",
++                    label="長さ倍率",
+                     minimum=0.5,
+                     maximum=1.5,
+                     value=1.0,
+@@ -483,12 +612,12 @@ def build_ui() -> gr.Blocks:
+ 
+             with gr.Row():
+                 t_schedule_mode = gr.Dropdown(
+-                    label="Time Schedule",
++                    label="時間スケジュール",
+                     choices=["linear", "sway"],
+                     value="linear",
+                 )
+                 sway_coeff = gr.Slider(
+-                    label="Sway Coeff",
++                    label="Sway係数",
+                     minimum=-1.0,
+                     maximum=1.5,
+                     value=-1.0,
+@@ -498,44 +627,44 @@ def build_ui() -> gr.Blocks:
+ 
+             with gr.Row():
+                 cfg_guidance_mode = gr.Dropdown(
+-                    label="CFG Guidance Mode",
++                    label="CFG誘導モード",
+                     choices=["independent", "joint", "alternating"],
+                     value="independent",
+                 )
+                 cfg_scale_text = gr.Slider(
+-                    label="CFG Scale Text",
++                    label="CFGスケール（テキスト）",
+                     minimum=0.0,
+                     maximum=10.0,
+                     value=3.0,
+                     step=0.1,
+                 )
+                 cfg_scale_speaker = gr.Slider(
+-                    label="CFG Scale Speaker",
++                    label="CFGスケール（話者）",
+                     minimum=0.0,
+                     maximum=10.0,
+                     value=5.0,
+                     step=0.1,
+                 )
+ 
+-        with gr.Accordion("Advanced (Optional)", open=False):
+-            cfg_scale_raw = gr.Textbox(label="CFG Scale Override (optional)", value="")
++        with gr.Accordion("詳細設定（任意）", open=False):
++            cfg_scale_raw = gr.Textbox(label="CFGスケール上書き（任意）", value="")
+             with gr.Row():
+-                cfg_min_t = gr.Number(label="CFG Min t", value=0.5)
+-                cfg_max_t = gr.Number(label="CFG Max t", value=1.0)
+-                context_kv_cache = gr.Checkbox(label="Context KV Cache", value=True)
++                cfg_min_t = gr.Number(label="CFG最小t", value=0.5)
++                cfg_max_t = gr.Number(label="CFG最大t", value=1.0)
++                context_kv_cache = gr.Checkbox(label="Context KVキャッシュ", value=True)
+             with gr.Row():
+-                truncation_factor_raw = gr.Textbox(label="Truncation Factor (optional)", value="")
+-                rescale_k_raw = gr.Textbox(label="Rescale k (optional)", value="")
+-                rescale_sigma_raw = gr.Textbox(label="Rescale sigma (optional)", value="")
++                truncation_factor_raw = gr.Textbox(label="Truncation Factor（任意）", value="")
++                rescale_k_raw = gr.Textbox(label="Rescale k（任意）", value="")
++                rescale_sigma_raw = gr.Textbox(label="Rescale sigma（任意）", value="")
+             with gr.Row():
+-                speaker_kv_scale_raw = gr.Textbox(label="Speaker KV Scale (optional)", value="")
+-                speaker_kv_min_t_raw = gr.Textbox(label="Speaker KV Min t (optional)", value="0.9")
++                speaker_kv_scale_raw = gr.Textbox(label="Speaker KV Scale（任意）", value="")
++                speaker_kv_min_t_raw = gr.Textbox(label="Speaker KV Min t（任意）", value="0.9")
+                 speaker_kv_max_layers_raw = gr.Textbox(
+-                    label="Speaker KV Max Layers (optional)", value=""
++                    label="Speaker KV Max Layers（任意）", value=""
+                 )
+-            lora_adapter_raw = gr.Textbox(label="LoRA Adapter Directory (optional)", value="")
++            lora_adapter_raw = gr.Textbox(label="LoRAアダプタフォルダ（任意）", value="")
+ 
+-        generate_btn = gr.Button("Generate", variant="primary")
++        generate_btn = gr.Button("生成", variant="primary")
+ 
+         out_audios: list[gr.Audio] = []
+         num_rows = (
+@@ -550,15 +679,55 @@ def build_ui() -> gr.Blocks:
+                             break
+                         out_audios.append(
+                             gr.Audio(
+-                                label=f"Generated Audio {i + 1}",
++                                label=f"生成音声 {i + 1}",
+                                 type="filepath",
+                                 interactive=False,
+                                 visible=(i == 0),
+                                 min_width=160,
+                             )
+                         )
+-        out_log = gr.Textbox(label="Run Log", lines=8)
+-        out_timing = gr.Textbox(label="Timing", lines=8)
++        out_log = gr.Textbox(label="実行ログ", lines=8)
++        out_timing = gr.Textbox(label="処理時間", lines=8)
++
++        with gr.Accordion("音声編集", open=False):
++            editor_history = gr.State([])
++            editor_redo = gr.State([])
++            editor_audio = gr.Audio(label="編集する音声", type="filepath", interactive=True)
++            with gr.Row():
++                load_editor_btn = gr.Button("読込 / プレイヤー編集を反映")
++                undo_audio_btn = gr.Button("元に戻す")
++                redo_audio_btn = gr.Button("やり直し")
++            with gr.Tabs():
++                with gr.Tab("範囲編集"):
++                    with gr.Row():
++                        edit_start_seconds = gr.Slider(
++                            label="開始",
++                            minimum=0.0,
++                            maximum=1.0,
++                            value=0.0,
++                            step=0.01,
++                        )
++                        edit_end_seconds = gr.Slider(
++                            label="終了",
++                            minimum=0.0,
++                            maximum=1.0,
++                            value=1.0,
++                            step=0.01,
++                        )
++                    with gr.Row():
++                        trim_audio_btn = gr.Button("選択範囲だけ残す")
++                        cut_audio_btn = gr.Button("選択範囲を削除")
++                with gr.Tab("音声を追加"):
++                    insert_audio = gr.Audio(label="追加する音声", type="filepath", interactive=True)
++                    insert_at_seconds = gr.Slider(
++                        label="追加位置",
++                        minimum=0.0,
++                        maximum=1.0,
++                        value=0.0,
++                        step=0.01,
++                    )
++                    insert_audio_btn = gr.Button("指定位置に追加")
++            editor_status = gr.Textbox(label="編集状態", lines=3, interactive=False)
+ 
+         generate_btn.click(
+             _run_generation,
+@@ -594,7 +763,96 @@ def build_ui() -> gr.Blocks:
+                 speaker_kv_max_layers_raw,
+                 lora_adapter_raw,
+             ],
+-            outputs=[*out_audios, out_log, out_timing],
++            outputs=[
++                *out_audios,
++                out_log,
++                out_timing,
++                editor_audio,
++                editor_history,
++                editor_redo,
++                editor_status,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
++        )
++        load_editor_btn.click(
++            _load_editor_audio,
++            inputs=[editor_audio],
++            outputs=[
++                editor_audio,
++                editor_history,
++                editor_redo,
++                editor_status,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
++        )
++        cut_audio_btn.click(
++            _cut_editor_audio,
++            inputs=[editor_audio, edit_start_seconds, edit_end_seconds, editor_history],
++            outputs=[
++                editor_audio,
++                editor_status,
++                editor_history,
++                editor_redo,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
++        )
++        trim_audio_btn.click(
++            _trim_editor_audio,
++            inputs=[editor_audio, edit_start_seconds, edit_end_seconds, editor_history],
++            outputs=[
++                editor_audio,
++                editor_status,
++                editor_history,
++                editor_redo,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
++        )
++        undo_audio_btn.click(
++            _undo_editor_audio,
++            inputs=[editor_history, editor_redo],
++            outputs=[
++                editor_audio,
++                editor_status,
++                editor_history,
++                editor_redo,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
++        )
++        redo_audio_btn.click(
++            _redo_editor_audio,
++            inputs=[editor_history, editor_redo],
++            outputs=[
++                editor_audio,
++                editor_status,
++                editor_history,
++                editor_redo,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
++        )
++        insert_audio_btn.click(
++            _insert_editor_audio,
++            inputs=[editor_audio, insert_audio, insert_at_seconds, editor_history],
++            outputs=[
++                editor_audio,
++                editor_status,
++                editor_history,
++                editor_redo,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
+         )
+         model_device.change(
+             _on_model_device_change, inputs=[model_device], outputs=[model_precision]
+diff --git a/gradio_app_voicedesign.py b/gradio_app_voicedesign.py
+index cde3445..2e2b69d 100644
+--- a/gradio_app_voicedesign.py
++++ b/gradio_app_voicedesign.py
+@@ -8,6 +8,14 @@ from pathlib import Path
+ import gradio as gr
+ from huggingface_hub import hf_hub_download
+ 
++from irodori_tts.audio_editor import (
++    apply_insert_edit,
++    apply_range_edit,
++    audio_duration_seconds,
++    redo_edit,
++    resolve_audio_path,
++    undo_edit,
++)
+ from irodori_tts.gradio_emoji_palette import EMOJI_PALETTE_CSS, build_emoji_palette
+ from irodori_tts.inference_runtime import (
+     RuntimeKey,
+@@ -19,6 +27,12 @@ from irodori_tts.inference_runtime import (
+     list_available_runtime_precisions,
+     save_wav,
+ )
++from irodori_tts.offline_paths import (
++    CODEC_REPO,
++    VOICEDESIGN_MODEL_REPO,
++    resolve_checkpoint_reference,
++    resolve_model_reference,
++)
+ from irodori_tts.speaker_inversion import is_speaker_inversion_safetensors_path
+ 
+ MAX_GRADIO_CANDIDATES = 32
+@@ -45,7 +59,7 @@ def _default_checkpoint() -> str:
+         return str(preferred[-1])
+     if candidates:
+         return str(candidates[-1])
+-    return "Aratako/Irodori-TTS-500M-v2-VoiceDesign"
++    return resolve_checkpoint_reference(VOICEDESIGN_MODEL_REPO)
+ 
+ 
+ def _default_model_device() -> str:
+@@ -125,7 +139,15 @@ def _resolve_checkpoint_path(raw_checkpoint: str) -> str:
+ 
+     suffix = Path(checkpoint).suffix.lower()
+     if suffix in {".pt", ".safetensors"}:
+-        return checkpoint
++        return resolve_checkpoint_reference(checkpoint)
++
++    local_checkpoint = resolve_checkpoint_reference(checkpoint)
++    if Path(local_checkpoint).is_file():
++        print(
++            f"[gradio-caption] checkpoint: bundled hf://{checkpoint} -> {local_checkpoint}",
++            flush=True,
++        )
++        return str(local_checkpoint)
+ 
+     resolved = hf_hub_download(repo_id=checkpoint, filename="model.safetensors")
+     print(f"[gradio-caption] checkpoint: hf://{checkpoint} -> {resolved}", flush=True)
+@@ -143,7 +165,7 @@ def _build_runtime_key(
+     return RuntimeKey(
+         checkpoint=checkpoint_path,
+         model_device=str(model_device),
+-        codec_repo="Aratako/Semantic-DACVAE-Japanese-32dim",
++        codec_repo=resolve_model_reference(CODEC_REPO),
+         model_precision=str(model_precision),
+         codec_device=str(codec_device),
+         codec_precision=str(codec_precision),
+@@ -168,16 +190,18 @@ def _describe_runtime(
+     )
+     runtime, reloaded = get_cached_runtime(runtime_key)
+     status = (
+-        "loaded model into memory" if reloaded else "model already loaded; reused existing runtime"
++        "モデルをメモリに読み込みました"
++        if reloaded
++        else "モデルは読み込み済みです。既存のランタイムを再利用しました"
+     )
+     notes: list[str] = []
+     if not runtime.model_cfg.use_caption_condition:
+         notes.append(
+-            "warning: this checkpoint does not enable caption conditioning. Use gradio_app.py for reference-audio inference."
++            "警告: このチェックポイントはキャプション条件付けに対応していません。参照音声推論には gradio_app.py を使ってください。"
+         )
+     if runtime.model_cfg.use_speaker_condition:
+         notes.append(
+-            "info: this checkpoint still supports speaker conditioning, but this UI always runs without reference audio."
++            "情報: このチェックポイントは話者条件付けにも対応していますが、このUIでは参照音声なしで実行します。"
+         )
+     return "\n".join(
+         [
+@@ -363,12 +387,119 @@ def _run_generation(
+             audio_updates.append(gr.update(value=out_paths[i], visible=True))
+         else:
+             audio_updates.append(gr.update(value=None, visible=False))
+-    return (*audio_updates, detail_text, timing_text)
++    editor_audio = out_paths[0] if out_paths else None
++    return (*audio_updates, detail_text, timing_text, *_load_editor_audio(editor_audio))
++
++
++def _selection_updates(duration: float, *, full_range: bool) -> tuple[object, object]:
++    maximum = max(float(duration), 0.001)
++    start_value = 0.0
++    end_value = maximum if full_range else min(1.0, maximum)
++    return (
++        gr.update(maximum=maximum, value=start_value),
++        gr.update(maximum=maximum, value=end_value),
++    )
++
++
++def _insert_point_update(duration: float) -> object:
++    return gr.update(maximum=max(float(duration), 0.001), value=0.0)
++
++
++def _load_editor_audio(source_audio: object) -> tuple[object, list[str], list[str], str, object, object, object]:
++    if source_audio is None:
++        start_update, end_update = _selection_updates(1.0, full_range=False)
++        return None, [], [], "音声が読み込まれていません。", start_update, end_update, _insert_point_update(1.0)
++    path = resolve_audio_path(source_audio)
++    duration = audio_duration_seconds(path)
++    start_update, end_update = _selection_updates(duration, full_range=True)
++    return (
++        path,
++        [path],
++        [],
++        f"読み込みました: {path}\n長さ: {duration:.3f}秒",
++        start_update,
++        end_update,
++        _insert_point_update(duration),
++    )
++
++
++def _apply_editor_range(
++    source_audio: object,
++    start_seconds: float,
++    end_seconds: float,
++    history: list[str] | None,
++    operation: str,
++) -> tuple[str, str, list[str], list[str], object, object, object]:
++    path, status, new_history, redo_stack = apply_range_edit(
++        source_audio,
++        start_seconds,
++        end_seconds,
++        operation,
++        history,
++    )
++    duration = audio_duration_seconds(path)
++    start_update, end_update = _selection_updates(duration, full_range=True)
++    return path, status, new_history, redo_stack, start_update, end_update, _insert_point_update(duration)
++
++
++def _trim_editor_audio(
++    source_audio: object,
++    start_seconds: float,
++    end_seconds: float,
++    history: list[str] | None,
++) -> tuple[str, str, list[str], list[str], object, object, object]:
++    return _apply_editor_range(source_audio, start_seconds, end_seconds, history, "trim")
++
++
++def _cut_editor_audio(
++    source_audio: object,
++    start_seconds: float,
++    end_seconds: float,
++    history: list[str] | None,
++) -> tuple[str, str, list[str], list[str], object, object, object]:
++    return _apply_editor_range(source_audio, start_seconds, end_seconds, history, "cut")
++
++
++def _insert_editor_audio(
++    source_audio: object,
++    insert_audio: object,
++    insert_at_seconds: float,
++    history: list[str] | None,
++) -> tuple[str, str, list[str], list[str], object, object, object]:
++    path, status, new_history, redo_stack = apply_insert_edit(
++        source_audio,
++        insert_audio,
++        insert_at_seconds,
++        history,
++    )
++    duration = audio_duration_seconds(path)
++    start_update, end_update = _selection_updates(duration, full_range=True)
++    return path, status, new_history, redo_stack, start_update, end_update, _insert_point_update(duration)
++
++
++def _undo_editor_audio(
++    history: list[str] | None,
++    redo_stack: list[str] | None,
++) -> tuple[str, str, list[str], list[str], object, object, object]:
++    path, status, new_history, new_redo = undo_edit(history, redo_stack)
++    duration = audio_duration_seconds(path) if path else 1.0
++    start_update, end_update = _selection_updates(duration, full_range=True)
++    return path, status, new_history, new_redo, start_update, end_update, _insert_point_update(duration)
++
++
++def _redo_editor_audio(
++    history: list[str] | None,
++    redo_stack: list[str] | None,
++) -> tuple[str, str, list[str], list[str], object, object, object]:
++    path, status, new_history, new_redo = redo_edit(history, redo_stack)
++    duration = audio_duration_seconds(path) if path else 1.0
++    start_update, end_update = _selection_updates(duration, full_range=True)
++    return path, status, new_history, new_redo, start_update, end_update, _insert_point_update(duration)
+ 
+ 
+ def _clear_runtime_cache() -> str:
+     clear_cached_runtime()
+-    return "cleared loaded model from memory"
++    return "読み込み済みモデルをメモリから解放しました"
+ 
+ 
+ def build_ui() -> gr.Blocks:
+@@ -379,74 +510,74 @@ def build_ui() -> gr.Blocks:
+     model_precision_choices = _precision_choices_for_device(default_model_device)
+     codec_precision_choices = _precision_choices_for_device(default_codec_device)
+ 
+-    with gr.Blocks(title="Irodori-TTS VoiceDesign Gradio") as demo:
+-        gr.Markdown("# Irodori-TTS VoiceDesign Inference")
++    with gr.Blocks(title="Irodori-TTS VoiceDesign 音声生成") as demo:
++        gr.Markdown("# Irodori-TTS VoiceDesign 音声生成")
+         gr.Markdown(
+-            "VoiceDesign版モデル向けのUIです。caption を入れると caption / style conditioning、空欄なら text-only conditioning で推論します。"
++            "VoiceDesign版モデル向けのUIです。キャプションを入れるとスタイル指定あり、空欄ならテキストのみで推論します。"
+         )
+ 
+         with gr.Row():
+             checkpoint = gr.Textbox(
+-                label="Model Checkpoint (.pt/.safetensors or HF repo id)",
++                label="モデルチェックポイント（.pt/.safetensors または HF repo id）",
+                 value=default_checkpoint,
+                 scale=4,
+             )
+             model_device = gr.Dropdown(
+-                label="Model Device",
++                label="モデルのデバイス",
+                 choices=device_choices,
+                 value=default_model_device,
+                 scale=1,
+             )
+             model_precision = gr.Dropdown(
+-                label="Model Precision",
++                label="モデルの精度",
+                 choices=model_precision_choices,
+                 value=model_precision_choices[0],
+                 scale=1,
+             )
+             codec_device = gr.Dropdown(
+-                label="Codec Device",
++                label="コーデックのデバイス",
+                 choices=device_choices,
+                 value=default_codec_device,
+                 scale=1,
+             )
+             codec_precision = gr.Dropdown(
+-                label="Codec Precision",
++                label="コーデックの精度",
+                 choices=codec_precision_choices,
+                 value=codec_precision_choices[0],
+                 scale=1,
+             )
+ 
+         with gr.Row():
+-            load_model_btn = gr.Button("Load Model")
+-            clear_cache_btn = gr.Button("Unload Model")
+-            clear_cache_msg = gr.Textbox(label="Model Status", interactive=False)
++            load_model_btn = gr.Button("モデル読込")
++            clear_cache_btn = gr.Button("モデル解放")
++            clear_cache_msg = gr.Textbox(label="モデル状態", interactive=False)
+ 
+         with gr.Column():
+             text = gr.Textbox(
+-                label="Text",
++                label="テキスト",
+                 lines=6,
+                 elem_id="irodori-voicedesign-text-input",
+             )
+             build_emoji_palette(text, open=False)
+         caption = gr.Textbox(
+-            label="Caption / Style Prompt (optional)",
++            label="キャプション / スタイル指定（任意）",
+             lines=4,
+         )
+ 
+-        with gr.Accordion("Sampling", open=True):
++        with gr.Accordion("生成設定", open=True):
+             with gr.Row():
+-                num_steps = gr.Slider(label="Num Steps", minimum=1, maximum=120, value=40, step=1)
++                num_steps = gr.Slider(label="ステップ数", minimum=1, maximum=120, value=40, step=1)
+                 num_candidates = gr.Slider(
+-                    label="Num Candidates",
++                    label="候補数",
+                     minimum=1,
+                     maximum=MAX_GRADIO_CANDIDATES,
+                     value=1,
+                     step=1,
+                 )
+-                seed_raw = gr.Textbox(label="Seed (blank=random)", value="")
+-                seconds_raw = gr.Textbox(label="Seconds (blank=auto)", value="")
++                seed_raw = gr.Textbox(label="シード（空欄=ランダム）", value="")
++                seconds_raw = gr.Textbox(label="秒数（空欄=自動）", value="")
+                 duration_scale = gr.Slider(
+-                    label="Duration Scale",
++                    label="長さ倍率",
+                     minimum=0.5,
+                     maximum=1.5,
+                     value=1.0,
+@@ -455,12 +586,12 @@ def build_ui() -> gr.Blocks:
+ 
+             with gr.Row():
+                 t_schedule_mode = gr.Dropdown(
+-                    label="Time Schedule",
++                    label="時間スケジュール",
+                     choices=["linear", "sway"],
+                     value="linear",
+                 )
+                 sway_coeff = gr.Slider(
+-                    label="Sway Coeff",
++                    label="Sway係数",
+                     minimum=-1.0,
+                     maximum=1.5,
+                     value=-1.0,
+@@ -470,41 +601,41 @@ def build_ui() -> gr.Blocks:
+ 
+             with gr.Row():
+                 cfg_guidance_mode = gr.Dropdown(
+-                    label="CFG Guidance Mode",
++                    label="CFG誘導モード",
+                     choices=["independent", "joint", "alternating"],
+                     value="independent",
+                 )
+                 cfg_scale_text = gr.Slider(
+-                    label="CFG Scale Text",
++                    label="CFGスケール（テキスト）",
+                     minimum=0.0,
+                     maximum=10.0,
+                     value=2.0,
+                     step=0.1,
+                 )
+                 cfg_scale_caption = gr.Slider(
+-                    label="CFG Scale Caption",
++                    label="CFGスケール（キャプション）",
+                     minimum=0.0,
+                     maximum=10.0,
+                     value=4.0,
+                     step=0.1,
+                 )
+ 
+-        with gr.Accordion("Advanced (Optional)", open=False):
+-            cfg_scale_raw = gr.Textbox(label="CFG Scale Override (optional)", value="")
++        with gr.Accordion("詳細設定（任意）", open=False):
++            cfg_scale_raw = gr.Textbox(label="CFGスケール上書き（任意）", value="")
+             with gr.Row():
+-                cfg_min_t = gr.Number(label="CFG Min t", value=0.5)
+-                cfg_max_t = gr.Number(label="CFG Max t", value=1.0)
+-                context_kv_cache = gr.Checkbox(label="Context KV Cache", value=True)
++                cfg_min_t = gr.Number(label="CFG最小t", value=0.5)
++                cfg_max_t = gr.Number(label="CFG最大t", value=1.0)
++                context_kv_cache = gr.Checkbox(label="Context KVキャッシュ", value=True)
+             with gr.Row():
+-                max_text_len_raw = gr.Textbox(label="Max Text Len (optional)", value="")
+-                max_caption_len_raw = gr.Textbox(label="Max Caption Len (optional)", value="")
++                max_text_len_raw = gr.Textbox(label="最大テキスト長（任意）", value="")
++                max_caption_len_raw = gr.Textbox(label="最大キャプション長（任意）", value="")
+             with gr.Row():
+-                truncation_factor_raw = gr.Textbox(label="Truncation Factor (optional)", value="")
+-                rescale_k_raw = gr.Textbox(label="Rescale k (optional)", value="")
+-                rescale_sigma_raw = gr.Textbox(label="Rescale sigma (optional)", value="")
+-            lora_adapter_raw = gr.Textbox(label="LoRA Adapter Directory (optional)", value="")
++                truncation_factor_raw = gr.Textbox(label="Truncation Factor（任意）", value="")
++                rescale_k_raw = gr.Textbox(label="Rescale k（任意）", value="")
++                rescale_sigma_raw = gr.Textbox(label="Rescale sigma（任意）", value="")
++            lora_adapter_raw = gr.Textbox(label="LoRAアダプタフォルダ（任意）", value="")
+ 
+-        generate_btn = gr.Button("Generate", variant="primary")
++        generate_btn = gr.Button("生成", variant="primary")
+ 
+         out_audios: list[gr.Audio] = []
+         num_rows = (
+@@ -519,15 +650,55 @@ def build_ui() -> gr.Blocks:
+                             break
+                         out_audios.append(
+                             gr.Audio(
+-                                label=f"Generated Audio {i + 1}",
++                                label=f"生成音声 {i + 1}",
+                                 type="filepath",
+                                 interactive=False,
+                                 visible=(i == 0),
+                                 min_width=160,
+                             )
+                         )
+-        out_log = gr.Textbox(label="Run Log", lines=8)
+-        out_timing = gr.Textbox(label="Timing", lines=8)
++        out_log = gr.Textbox(label="実行ログ", lines=8)
++        out_timing = gr.Textbox(label="処理時間", lines=8)
++
++        with gr.Accordion("音声編集", open=False):
++            editor_history = gr.State([])
++            editor_redo = gr.State([])
++            editor_audio = gr.Audio(label="編集する音声", type="filepath", interactive=True)
++            with gr.Row():
++                load_editor_btn = gr.Button("読込 / プレイヤー編集を反映")
++                undo_audio_btn = gr.Button("元に戻す")
++                redo_audio_btn = gr.Button("やり直し")
++            with gr.Tabs():
++                with gr.Tab("範囲編集"):
++                    with gr.Row():
++                        edit_start_seconds = gr.Slider(
++                            label="開始",
++                            minimum=0.0,
++                            maximum=1.0,
++                            value=0.0,
++                            step=0.01,
++                        )
++                        edit_end_seconds = gr.Slider(
++                            label="終了",
++                            minimum=0.0,
++                            maximum=1.0,
++                            value=1.0,
++                            step=0.01,
++                        )
++                    with gr.Row():
++                        trim_audio_btn = gr.Button("選択範囲だけ残す")
++                        cut_audio_btn = gr.Button("選択範囲を削除")
++                with gr.Tab("音声を追加"):
++                    insert_audio = gr.Audio(label="追加する音声", type="filepath", interactive=True)
++                    insert_at_seconds = gr.Slider(
++                        label="追加位置",
++                        minimum=0.0,
++                        maximum=1.0,
++                        value=0.0,
++                        step=0.01,
++                    )
++                    insert_audio_btn = gr.Button("指定位置に追加")
++            editor_status = gr.Textbox(label="編集状態", lines=3, interactive=False)
+ 
+         generate_btn.click(
+             _run_generation,
+@@ -560,7 +731,96 @@ def build_ui() -> gr.Blocks:
+                 rescale_sigma_raw,
+                 lora_adapter_raw,
+             ],
+-            outputs=[*out_audios, out_log, out_timing],
++            outputs=[
++                *out_audios,
++                out_log,
++                out_timing,
++                editor_audio,
++                editor_history,
++                editor_redo,
++                editor_status,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
++        )
++        load_editor_btn.click(
++            _load_editor_audio,
++            inputs=[editor_audio],
++            outputs=[
++                editor_audio,
++                editor_history,
++                editor_redo,
++                editor_status,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
++        )
++        cut_audio_btn.click(
++            _cut_editor_audio,
++            inputs=[editor_audio, edit_start_seconds, edit_end_seconds, editor_history],
++            outputs=[
++                editor_audio,
++                editor_status,
++                editor_history,
++                editor_redo,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
++        )
++        trim_audio_btn.click(
++            _trim_editor_audio,
++            inputs=[editor_audio, edit_start_seconds, edit_end_seconds, editor_history],
++            outputs=[
++                editor_audio,
++                editor_status,
++                editor_history,
++                editor_redo,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
++        )
++        undo_audio_btn.click(
++            _undo_editor_audio,
++            inputs=[editor_history, editor_redo],
++            outputs=[
++                editor_audio,
++                editor_status,
++                editor_history,
++                editor_redo,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
++        )
++        redo_audio_btn.click(
++            _redo_editor_audio,
++            inputs=[editor_history, editor_redo],
++            outputs=[
++                editor_audio,
++                editor_status,
++                editor_history,
++                editor_redo,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
++        )
++        insert_audio_btn.click(
++            _insert_editor_audio,
++            inputs=[editor_audio, insert_audio, insert_at_seconds, editor_history],
++            outputs=[
++                editor_audio,
++                editor_status,
++                editor_history,
++                editor_redo,
++                edit_start_seconds,
++                edit_end_seconds,
++                insert_at_seconds,
++            ],
+         )
+         model_device.change(
+             _on_model_device_change, inputs=[model_device], outputs=[model_precision]
+diff --git a/infer.py b/infer.py
+index 3ff8849..bf9a0fa 100644
+--- a/infer.py
++++ b/infer.py
+@@ -15,6 +15,7 @@ from irodori_tts.inference_runtime import (
+     resolve_cfg_scales,
+     save_wav,
+ )
++from irodori_tts.offline_paths import CODEC_REPO, resolve_checkpoint_reference, resolve_model_reference
+ 
+ 
+ def _parse_optional_float(value: str) -> float | None:
+@@ -41,7 +42,7 @@ def _print_timings(timings: list[tuple[str, float]], total_to_decode: float) ->
+ 
+ def _resolve_checkpoint_path(args: argparse.Namespace) -> str:
+     if args.checkpoint is not None:
+-        checkpoint_path = Path(str(args.checkpoint)).expanduser()
++        checkpoint_path = Path(resolve_checkpoint_reference(str(args.checkpoint))).expanduser()
+         if not checkpoint_path.is_file():
+             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+         print(f"[checkpoint] using local file: {checkpoint_path}", flush=True)
+@@ -51,6 +52,14 @@ def _resolve_checkpoint_path(args: argparse.Namespace) -> str:
+     if repo_id == "":
+         raise ValueError("hf_checkpoint must be non-empty.")
+ 
++    local_checkpoint = resolve_checkpoint_reference(repo_id)
++    if Path(local_checkpoint).is_file():
++        print(
++            f"[checkpoint] using bundled checkpoint for hf://{repo_id}: {local_checkpoint}",
++            flush=True,
++        )
++        return str(local_checkpoint)
++
+     checkpoint_path = hf_hub_download(
+         repo_id=repo_id,
+         filename="model.safetensors",
+@@ -152,7 +161,7 @@ def main() -> None:
+             "(default: enabled)."
+         ),
+     )
+-    parser.add_argument("--codec-repo", default="Aratako/Semantic-DACVAE-Japanese-32dim")
++    parser.add_argument("--codec-repo", default=resolve_model_reference(CODEC_REPO))
+     parser.add_argument(
+         "--max-text-len",
+         type=int,
+diff --git a/irodori_tts/audio_editor.py b/irodori_tts/audio_editor.py
+new file mode 100644
+index 0000000..86e60a0
+--- /dev/null
++++ b/irodori_tts/audio_editor.py
+@@ -0,0 +1,199 @@
++from __future__ import annotations
++
++from datetime import datetime
++from os import PathLike
++from pathlib import Path
++
++import numpy as np
++
++
++def _coerce_audio_path(value: object) -> Path:
++    if value is None:
++        raise ValueError("Audio file is required.")
++    if isinstance(value, str | PathLike):
++        path = Path(value)
++    elif isinstance(value, dict):
++        candidate = value.get("path") or value.get("name")
++        path = Path(str(candidate).strip()) if candidate else Path()
++    else:
++        candidate = getattr(value, "name", None)
++        path = Path(str(candidate).strip()) if candidate else Path(str(value).strip())
++    if not path.is_file():
++        raise FileNotFoundError(f"Audio file not found: {path}")
++    return path
++
++
++def _read_audio(path: Path) -> tuple[np.ndarray, int]:
++    import soundfile as sf
++
++    audio, sample_rate = sf.read(str(path), dtype="float32", always_2d=True)
++    return audio, int(sample_rate)
++
++
++def _write_audio(audio: np.ndarray, sample_rate: int, *, operation: str) -> Path:
++    import soundfile as sf
++
++    out_dir = Path("audio_edits")
++    out_dir.mkdir(parents=True, exist_ok=True)
++    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
++    out_path = out_dir / f"{operation}_{stamp}.wav"
++    sf.write(str(out_path), audio, sample_rate)
++    return out_path.resolve()
++
++
++def _seconds_to_index(value: float | int | None, sample_rate: int, total_samples: int) -> int:
++    if value is None:
++        return 0
++    try:
++        seconds = float(value)
++    except (TypeError, ValueError):
++        seconds = 0.0
++    idx = int(round(seconds * sample_rate))
++    return max(0, min(total_samples, idx))
++
++
++def _match_channels(audio: np.ndarray, channels: int) -> np.ndarray:
++    if audio.shape[1] == channels:
++        return audio
++    if audio.shape[1] == 1:
++        return np.repeat(audio, channels, axis=1)
++    if channels == 1:
++        return audio.mean(axis=1, keepdims=True)
++    if audio.shape[1] > channels:
++        return audio[:, :channels]
++    pad = np.repeat(audio[:, -1:], channels - audio.shape[1], axis=1)
++    return np.concatenate([audio, pad], axis=1)
++
++
++def _resample_if_needed(audio: np.ndarray, source_sr: int, target_sr: int) -> np.ndarray:
++    if source_sr == target_sr:
++        return audio
++    import torch
++    import torchaudio.functional as F
++
++    tensor = torch.from_numpy(audio.T)
++    resampled = F.resample(tensor, source_sr, target_sr)
++    return resampled.T.numpy().astype("float32", copy=False)
++
++
++def audio_duration_seconds(source_audio: object) -> float:
++    path = _coerce_audio_path(source_audio)
++    audio, sample_rate = _read_audio(path)
++    return audio.shape[0] / float(sample_rate)
++
++
++def resolve_audio_path(source_audio: object) -> str:
++    return str(_coerce_audio_path(source_audio).resolve())
++
++
++def edit_audio_file(
++    source_audio: object,
++    insert_audio: object | None,
++    start_seconds: float | int | None,
++    end_seconds: float | int | None,
++    insert_at_seconds: float | int | None,
++    operation: str,
++) -> tuple[str, str]:
++    source_path = _coerce_audio_path(source_audio)
++    source, sample_rate = _read_audio(source_path)
++    total_samples = source.shape[0]
++    start_idx = _seconds_to_index(start_seconds, sample_rate, total_samples)
++    end_idx = _seconds_to_index(end_seconds, sample_rate, total_samples)
++    if end_idx < start_idx:
++        start_idx, end_idx = end_idx, start_idx
++
++    op = str(operation).strip().lower()
++    if op == "trim":
++        if end_idx <= start_idx:
++            raise ValueError("Trim end seconds must be greater than start seconds.")
++        edited = source[start_idx:end_idx]
++    elif op == "cut":
++        edited = np.concatenate([source[:start_idx], source[end_idx:]], axis=0)
++    elif op == "mute":
++        edited = source.copy()
++        edited[start_idx:end_idx] = 0.0
++    elif op == "insert":
++        insert_path = _coerce_audio_path(insert_audio)
++        insert, insert_sr = _read_audio(insert_path)
++        insert = _resample_if_needed(insert, insert_sr, sample_rate)
++        insert = _match_channels(insert, source.shape[1])
++        insert_idx = _seconds_to_index(insert_at_seconds, sample_rate, total_samples)
++        edited = np.concatenate([source[:insert_idx], insert, source[insert_idx:]], axis=0)
++    else:
++        raise ValueError(f"Unknown audio edit operation: {operation}")
++
++    out_path = _write_audio(edited, sample_rate, operation=op)
++    duration = edited.shape[0] / float(sample_rate)
++    return str(out_path), f"保存先: {out_path}\n長さ: {duration:.3f}秒\nサンプルレート: {sample_rate}"
++
++
++def apply_range_edit(
++    source_audio: object,
++    start_seconds: float | int | None,
++    end_seconds: float | int | None,
++    operation: str,
++    history: list[str] | None,
++) -> tuple[str, str, list[str], list[str]]:
++    source_path = str(_coerce_audio_path(source_audio).resolve())
++    out_path, status = edit_audio_file(
++        source_path,
++        None,
++        start_seconds,
++        end_seconds,
++        None,
++        operation,
++    )
++
++    new_history = list(history or [])
++    if not new_history or str(Path(new_history[-1]).resolve()) != source_path:
++        new_history.append(source_path)
++    new_history.append(out_path)
++    return out_path, status, new_history, []
++
++
++def apply_insert_edit(
++    source_audio: object,
++    insert_audio: object,
++    insert_at_seconds: float | int | None,
++    history: list[str] | None,
++) -> tuple[str, str, list[str], list[str]]:
++    source_path = str(_coerce_audio_path(source_audio).resolve())
++    out_path, status = edit_audio_file(
++        source_path,
++        insert_audio,
++        None,
++        None,
++        insert_at_seconds,
++        "insert",
++    )
++
++    new_history = list(history or [])
++    if not new_history or str(Path(new_history[-1]).resolve()) != source_path:
++        new_history.append(source_path)
++    new_history.append(out_path)
++    return out_path, status, new_history, []
++
++
++def undo_edit(history: list[str] | None, redo_stack: list[str] | None) -> tuple[str, str, list[str], list[str]]:
++    new_history = list(history or [])
++    new_redo = list(redo_stack or [])
++    if len(new_history) <= 1:
++        current = new_history[-1] if new_history else ""
++        return current, "元に戻せる編集がありません", new_history, new_redo
++
++    current = new_history.pop()
++    new_redo.insert(0, current)
++    restored = new_history[-1]
++    return restored, f"元に戻しました: {restored}", new_history, new_redo
++
++
++def redo_edit(history: list[str] | None, redo_stack: list[str] | None) -> tuple[str, str, list[str], list[str]]:
++    new_history = list(history or [])
++    new_redo = list(redo_stack or [])
++    if not new_redo:
++        current = new_history[-1] if new_history else ""
++        return current, "やり直せる編集がありません", new_history, new_redo
++
++    restored = new_redo.pop(0)
++    new_history.append(restored)
++    return restored, f"やり直しました: {restored}", new_history, new_redo
+diff --git a/irodori_tts/codec.py b/irodori_tts/codec.py
+index f1d4067..85c1772 100644
+--- a/irodori_tts/codec.py
++++ b/irodori_tts/codec.py
+@@ -8,6 +8,8 @@ import torch
+ import torchaudio
+ from huggingface_hub import hf_hub_download
+ 
++from .offline_paths import resolve_model_reference
++
+ _CODEC_DEFAULT = object()
+ 
+ 
+@@ -64,9 +66,11 @@ class DACVAECodec:
+                 sys.path.insert(0, str(local_repo))
+             from dacvae import DACVAE
+ 
+-        location = str(repo_id).strip()
++        location = resolve_model_reference(str(repo_id).strip())
+         if location.startswith("hf://"):
+             location = location[len("hf://") :]
++        if Path(location).is_dir() and (Path(location) / "weights.pth").is_file():
++            location = str(Path(location) / "weights.pth")
+         if not Path(location).exists() and "/" in location and not location.endswith(".pth"):
+             try:
+                 location = hf_hub_download(repo_id=location, filename="weights.pth")
+diff --git a/irodori_tts/inference_runtime.py b/irodori_tts/inference_runtime.py
+index 242cf5e..ae83664 100644
+--- a/irodori_tts/inference_runtime.py
++++ b/irodori_tts/inference_runtime.py
+@@ -23,6 +23,7 @@ from .config import ModelConfig
+ from .duration import build_duration_features
+ from .lora import checkpoint_state_uses_lora, is_lora_adapter_dir, load_lora_adapter
+ from .model import TextToLatentRFDiT
++from .offline_paths import resolve_checkpoint_reference, resolve_model_reference
+ from .rf import sample_euler_rf_cfg
+ from .speaker_inversion import (
+     load_speaker_inversion_payload,
+@@ -481,9 +482,10 @@ class InferenceRuntime:
+             device=codec_device,
+         )
+ 
+-        model_state, model_cfg_dict, train_cfg = _load_checkpoint_for_inference(
+-            Path(key.checkpoint)
+-        )
++        checkpoint_path = resolve_checkpoint_reference(key.checkpoint)
++        codec_repo = resolve_model_reference(key.codec_repo)
++
++        model_state, model_cfg_dict, train_cfg = _load_checkpoint_for_inference(Path(checkpoint_path))
+         model_cfg = ModelConfig(**model_cfg_dict)
+ 
+         model = TextToLatentRFDiT(model_cfg).to(model_device)
+@@ -499,7 +501,7 @@ class InferenceRuntime:
+         tokenizer = PretrainedTextTokenizer.from_pretrained(
+             repo_id=model_cfg.text_tokenizer_repo,
+             add_bos=bool(model_cfg.text_add_bos),
+-            local_files_only=False,
++            local_files_only=True,
+         )
+         if tokenizer.vocab_size != model_cfg.text_vocab_size:
+             raise ValueError(
+@@ -511,7 +513,7 @@ class InferenceRuntime:
+             caption_tokenizer = PretrainedTextTokenizer.from_pretrained(
+                 repo_id=model_cfg.caption_tokenizer_repo_resolved,
+                 add_bos=model_cfg.caption_add_bos_resolved,
+-                local_files_only=False,
++                local_files_only=True,
+             )
+             if caption_tokenizer.vocab_size != model_cfg.caption_vocab_size_resolved:
+                 raise ValueError(
+@@ -532,7 +534,7 @@ class InferenceRuntime:
+                 default_caption_max_len = default_text_max_len
+ 
+         codec = DACVAECodec.load(
+-            repo_id=key.codec_repo,
++            repo_id=codec_repo,
+             device=str(codec_device),
+             dtype=codec_dtype,
+             deterministic_encode=bool(key.codec_deterministic_encode),
+diff --git a/irodori_tts/offline_paths.py b/irodori_tts/offline_paths.py
+new file mode 100644
+index 0000000..f4223cc
+--- /dev/null
++++ b/irodori_tts/offline_paths.py
+@@ -0,0 +1,83 @@
++from __future__ import annotations
++
++import os
++from pathlib import Path
++
++
++BASE_MODEL_REPO = "Aratako/Irodori-TTS-500M-v3"
++BASE_MODEL_V2_REPO = "Aratako/Irodori-TTS-500M-v2"
++VOICEDESIGN_MODEL_REPO = "Aratako/Irodori-TTS-500M-v2-VoiceDesign"
++CODEC_REPO = "Aratako/Semantic-DACVAE-Japanese-32dim"
++
++_CHECKPOINT_FILES = {
++    BASE_MODEL_REPO.lower(): ("base", "model.safetensors"),
++    BASE_MODEL_V2_REPO.lower(): ("base_v2", "model.safetensors"),
++    VOICEDESIGN_MODEL_REPO.lower(): ("voicedesign", "model.safetensors"),
++}
++
++_MODEL_DIRS = {
++    CODEC_REPO.lower(): ("codec",),
++}
++
++
++def bundle_root() -> Path:
++    return Path(__file__).resolve().parents[2]
++
++
++def models_dir() -> Path:
++    raw = os.environ.get("IRODORI_TTS_MODELS_DIR", "").strip()
++    if raw:
++        return Path(raw).expanduser().resolve()
++    return bundle_root() / "models"
++
++
++def tokenizers_dir() -> Path:
++    return models_dir() / "tokenizers"
++
++
++def repo_dir_name(repo_id: str) -> str:
++    return str(repo_id).strip().replace("/", "__")
++
++
++def resolve_checkpoint_reference(reference: str) -> str:
++    value = str(reference).strip()
++    local = Path(value).expanduser()
++    if local.is_file():
++        return str(local)
++
++    parts = _CHECKPOINT_FILES.get(value.lower())
++    if parts is not None:
++        candidate = models_dir().joinpath(*parts)
++        if candidate.is_file():
++            return str(candidate)
++    return value
++
++
++def resolve_model_reference(reference: str) -> str:
++    value = str(reference).strip()
++    local = Path(value).expanduser()
++    if local.exists():
++        if local.is_dir() and (local / "weights.pth").is_file():
++            return str(local / "weights.pth")
++        return str(local)
++
++    parts = _MODEL_DIRS.get(value.lower())
++    if parts is not None:
++        candidate = models_dir().joinpath(*parts)
++        if candidate.is_dir() and (candidate / "weights.pth").is_file():
++            return str(candidate / "weights.pth")
++        if candidate.exists():
++            return str(candidate)
++    return value
++
++
++def resolve_tokenizer_reference(repo_id: str) -> tuple[str, bool]:
++    value = str(repo_id).strip()
++    local = Path(value).expanduser()
++    if local.exists():
++        return str(local), True
++
++    candidate = tokenizers_dir() / repo_dir_name(value)
++    if candidate.exists():
++        return str(candidate), True
++    return value, False
+diff --git a/irodori_tts/tokenizer.py b/irodori_tts/tokenizer.py
+index 2a058fa..db1dde6 100644
+--- a/irodori_tts/tokenizer.py
++++ b/irodori_tts/tokenizer.py
+@@ -2,6 +2,8 @@ from collections.abc import Iterable
+ 
+ import torch
+ 
++from .offline_paths import resolve_tokenizer_reference
++
+ 
+ class ByteTokenizer:
+     """Simple byte-level tokenizer for text-to-speech."""
+@@ -86,11 +88,12 @@ class PretrainedTextTokenizer:
+                 "Install with `pip install transformers sentencepiece`."
+             ) from exc
+ 
++        resolved_repo_id, bundled_local = resolve_tokenizer_reference(repo_id)
+         tokenizer = AutoTokenizer.from_pretrained(
+-            repo_id,
++            resolved_repo_id,
+             use_fast=True,
+             trust_remote_code=False,
+-            local_files_only=local_files_only,
++            local_files_only=bool(local_files_only or bundled_local),
+         )
+         return cls(tokenizer=tokenizer, add_bos=add_bos)
+ 
+diff --git a/irodori_tts/watermark.py b/irodori_tts/watermark.py
+index d84932b..6bed9fb 100644
+--- a/irodori_tts/watermark.py
++++ b/irodori_tts/watermark.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ import logging
++import os
+ from collections.abc import Iterable
+ 
+ import torch
+@@ -31,6 +32,12 @@ class SilentCipherWatermarker:
+ 
+     @staticmethod
+     def _load_backend(*, device: str, model_type: str):
++        if os.environ.get("HF_HUB_OFFLINE") == "1" or os.environ.get("TRANSFORMERS_OFFLINE") == "1":
++            logger.info(
++                "Offline mode is enabled; skipping SilentCipher watermark model loading."
++            )
++            return None
++
+         try:
+             import silentcipher
+         except ImportError:
+diff --git a/pyproject.toml b/pyproject.toml
+index 3fadba6..927d563 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -16,7 +16,7 @@ dependencies = [
+     "pyyaml>=6.0",
+     "safetensors>=0.7.0",
+     "soundfile>=0.12.0",
+-    "sentencepiece>=0.1.99,<0.2",
++    "sentencepiece>=0.2.0,<0.3",
+     "silentcipher @ git+https://github.com/SesameAILabs/silentcipher.git@d46d7d0893a583d8968ab3a6626e2289faec9152",
+     "torch>=2.10.0",
+     "torchaudio>=2.10.0",

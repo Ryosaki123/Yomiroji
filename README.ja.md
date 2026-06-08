@@ -7,33 +7,67 @@
 **1 つのポッドキャスト WAV** と、タイムスタンプ付きの字幕（SRT / WebVTT / JSON）として
 書き出します。字幕はあとで動画クリップと同期するのに使えます。
 
-音声には `../IrodoriTTS-offline` に同梱された日本語 **Irodori-TTS** モデルを利用します
-（実行時に API も外部ネットワークも使いません）。主な対象は日本語ですが、英語も
-（話者ごとの言語設定として）構造的に対応しており、英語チェックポイントで後から検証できます。
+音声エンジンには日本語 **Irodori-TTS**（作者 **Aratako** 氏、MIT ライセンス）を利用します。
+これは自分でインストールします（本リポジトリはモデルの重みを再配布しません）。セットアップ後は
+実行時に API も外部ネットワークも使いません。主な対象は日本語ですが、英語も（話者ごとの言語
+設定として）構造的に対応しています。
 
 構成は小さな **React シングルページアプリ**（`web/`）と、TTS を実行するローカルの
-**FastAPI バックエンド**（`server/`）です。どちらも既存の `../IrodoriTTS-offline` の
-venv を再利用するため、追加の Python 依存はありません。
+**FastAPI バックエンド**（`server/`）です。バックエンドは Irodori-TTS の Python 環境を再利用
+するため、独自の追加 Python 依存はありません。
+
+> **ライセンス:** Yomiroji は MIT（[LICENSE](LICENSE)）。Irodori-TTS のコードとモデルの重みは
+> いずれも Aratako 氏による MIT（商用利用可）です。モデルの倫理ガイドライン（本人の同意なき
+> 声の模倣・ディープフェイク・誤情報の生成をしない）に従ってください。詳細は
+> [CREDITS.md](CREDITS.md)。
 
 ---
 
-## 初回セットアップ
+## 前提条件
 
-1. `../IrodoriTTS-offline` がセットアップ済みであること（`.venv` が存在すること。なければ
-   そのプロジェクトの `run_setup_offline.bat` を一度実行）。
-2. フロントエンドの素材を**一度だけ**取得します（この時だけネットワークが必要）：
-   ```powershell
-   .\vendor_fetch.ps1
-   ```
-   （`web/vendor/react.production.min.js` があれば取得済みです。）これ以降は 100% オフラインで
-   動作します。
+- **Windows**、PATH 上の **Python 3.12.x**、**git**。
+- **NVIDIA GPU（CUDA 12.8 ドライバ）** を推奨。GPU がなくても CPU で動作します（かなり遅い。
+  その場合は CPU 版 PyTorch を入れてください。手順 2 の注を参照）。
+
+## セットアップ
+
+```powershell
+# 1. Yomiroji を取得
+git clone https://github.com/Ryosaki123/Yomiroji.git
+cd Yomiroji
+
+# 2. Irodori-TTS エンジン + モデルを用意（隣に ..\IrodoriTTS-offline\ を作成）
+#    Aratako/Irodori-TTS（固定コミット）を clone し、オフライン用パッチを当て、venv を作り、
+#    Hugging Face から MIT のモデルをダウンロードします。ネット接続が必要・数 GB（PyTorch + モデル）。
+.\setup_irodori.ps1
+
+# 3. フロントエンドのライブラリ/フォントをローカルに取得（一度だけ。UI をオフライン化）
+.\vendor_fetch.ps1
+```
+
+> CPU のみの場合：手順 2 のあと torch を CUDA なしで入れ直します。例:
+> `..\IrodoriTTS-offline\.venv\Scripts\python -m pip install torch torchaudio`
 
 ## 起動
 
 ```cmd
 run_podcast.bat
 ```
-ブラウザで <http://127.0.0.1:7864> を開きます。Wi-Fi をオフにしたままでも動作します。
+ブラウザで <http://127.0.0.1:7864> を開きます。セットアップ後は完全オフライン（Wi-Fi オフで可）。
+
+### 手動セットアップ（`setup_irodori.ps1` が失敗した場合）
+
+隣の `..\IrodoriTTS-offline\` に対して、スクリプトは次を自動化しているだけです:
+1. `git clone https://github.com/Aratako/Irodori-TTS.git irodori-src` →
+   `git checkout d2af4193ea172b4214433e72f24f3b0f13d2c1bd` →
+   `git apply <Yomiroji>\setup\offline-local-patches.patch`
+2. `python -m venv .venv`；`setup/requirements.txt` を導入
+   （`--extra-index-url https://download.pytorch.org/whl/cu128`）し、
+   `pip install --no-deps -e irodori-src`
+3. `models\` 配下へダウンロード：`Aratako/Irodori-TTS-500M-v3`→`base\model.safetensors`、
+   `Aratako/Irodori-TTS-500M-v2-VoiceDesign`→`voicedesign\model.safetensors`、
+   `Aratako/Semantic-DACVAE-Japanese-32dim`→`codec\weights.pth`、
+   `llm-jp/llm-jp-3-150m` のトークナイザ各ファイル→`tokenizers\llm-jp__llm-jp-3-150m\`。
 
 > コードを変更したら、**サーバーを再起動**（`run_podcast.bat` のウィンドウを閉じて再実行）し、
 > **ブラウザを更新**してください。バックエンドは `Cache-Control: no-store` を返すので、
@@ -159,3 +193,12 @@ SCRIPT_FORMAT.md   台本の書式と、台本生成用の LLM プロンプト
 - Base v3 と VoiceDesign を同時に常駐させると約 4 GB の VRAM を使います。モデルは初回使用時に
   遅延読み込みされ、バックエンド（`POST /api/models/free`）で解放できます。
 - 上流の SilentCipher 透かしはオフラインモードでは無効です（ベース配布と同様）。
+
+## ライセンス・クレジット
+
+- **Yomiroji**（本リポジトリ）: MIT — [LICENSE](LICENSE)。
+- **Irodori-TTS** エンジン・モデル: © **Aratako** 氏、MIT —
+  <https://github.com/Aratako/Irodori-TTS>。重みは再配布せず、`setup_irodori.ps1` が
+  Hugging Face から取得します。
+- 完全な帰属表示と**倫理ガイドライン**（声の無断模倣・ディープフェイク・誤情報の禁止）は
+  [CREDITS.md](CREDITS.md) を参照してください。

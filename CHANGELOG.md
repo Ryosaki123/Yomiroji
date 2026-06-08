@@ -12,6 +12,15 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Public-release setup & licensing.** `LICENSE` (MIT); `CREDITS.md` attributing the
+  Irodori-TTS engine + models to Aratako (MIT) with the models' ethical-use note;
+  `setup_irodori.ps1` that reproduces the engine from public sources (clones upstream
+  Irodori-TTS at the pinned commit, applies the offline patch, builds a venv, downloads
+  the MIT models from Hugging Face); and `setup/` (the offline patch + requirements).
+- README (EN/JA): **Prerequisites** and **Setup** (automated + manual fallback) and a
+  **License & credits** section. The repo ships no model weights.
+
 ### Changed
 - README: added an EN/JA language switcher in the header and set the title to **Yomiroji**.
 
