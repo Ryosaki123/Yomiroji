@@ -31,20 +31,27 @@
 
 ## セットアップ
 
-```powershell
-# 1. Yomiroji を取得
+**コマンドプロンプト（cmd）** で、プロジェクトを置きたいフォルダから実行します:
+
+```cmd
+:: 1. Yomiroji を取得
 git clone https://github.com/Ryosaki123/Yomiroji.git
 cd Yomiroji
 
-# 2. Irodori-TTS エンジン + モデルを用意（隣に ..\IrodoriTTS-offline\ を作成）
-#    Aratako/Irodori-TTS（固定コミット）を clone し、オフライン用パッチを当て、venv を作り、
-#    Hugging Face から MIT のモデルをダウンロードします。ネット接続が必要・数 GB（PyTorch + モデル）。
-.\setup_irodori.ps1
+:: 2. Irodori-TTS エンジン + モデルを用意（隣に ..\IrodoriTTS-offline\ を作成）
+::    Aratako/Irodori-TTS（固定コミット）を clone し、オフライン用パッチを当て、venv を作り、
+::    Hugging Face から MIT のモデルをダウンロードします。ネット接続が必要・数 GB（PyTorch + モデル）。
+::    .bat はダブルクリックでも実行できます。
+setup_irodori.bat
 
-# 3. フロントエンドのライブラリ/フォントをローカルに取得（一度だけ。UI をオフライン化）
-.\vendor_fetch.ps1
+:: 3. フロントエンドのライブラリ/フォントをローカルに取得（一度だけ。UI をオフライン化）
+vendor_fetch.bat
 ```
 
+> `.bat` は対応する `.ps1` を PowerShell（実行ポリシー回避）で起動するだけです。
+> **cmd で `.\setup_irodori.ps1` を直接打っても何も起きません** — `.bat` を使うか、
+> PowerShell ウィンドウから `.ps1` を実行してください。
+>
 > CPU のみの場合：手順 2 のあと torch を CUDA なしで入れ直します。例:
 > `..\IrodoriTTS-offline\.venv\Scripts\python -m pip install torch torchaudio`
 

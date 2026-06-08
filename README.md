@@ -31,21 +31,27 @@ are **no extra Python dependencies** of its own.
 
 ## Setup
 
-```powershell
-# 1. Get Yomiroji
+Run these from **Command Prompt (cmd)** in the folder where you want the project:
+
+```cmd
+:: 1. Get Yomiroji
 git clone https://github.com/Ryosaki123/Yomiroji.git
 cd Yomiroji
 
-# 2. Set up the Irodori-TTS engine + models (creates a sibling ..\IrodoriTTS-offline\)
-#    Clones Aratako/Irodori-TTS (pinned commit), applies the offline patch, builds a
-#    venv, and downloads the MIT models from Hugging Face. Needs internet; downloads
-#    several GB (PyTorch + models).
-.\setup_irodori.ps1
+:: 2. Set up the Irodori-TTS engine + models (creates a sibling ..\IrodoriTTS-offline\)
+::    Clones Aratako/Irodori-TTS (pinned commit), applies the offline patch, builds a
+::    venv, and downloads the MIT models from Hugging Face. Needs internet; downloads
+::    several GB (PyTorch + models). Double-clicking the .bat also works.
+setup_irodori.bat
 
-# 3. Vendor the frontend libs/fonts locally (one-time, so the UI runs offline)
-.\vendor_fetch.ps1
+:: 3. Vendor the frontend libs/fonts locally (one-time, so the UI runs offline)
+vendor_fetch.bat
 ```
 
+> The `.bat` files just launch the matching `.ps1` in PowerShell with the execution
+> policy bypassed. **Running `.\setup_irodori.ps1` directly in cmd does nothing** — use
+> the `.bat`, or run the `.ps1` from a PowerShell window.
+>
 > CPU-only: after step 2, reinstall torch without CUDA, e.g.
 > `..\IrodoriTTS-offline\.venv\Scripts\python -m pip install torch torchaudio` .
 

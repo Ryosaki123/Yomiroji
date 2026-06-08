@@ -24,6 +24,11 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ### Changed
 - README: added an EN/JA language switcher in the header and set the title to **Yomiroji**.
 
+### Fixed
+- Setup couldn't be launched from cmd (`.ps1` doesn't run there). Added
+  `setup_irodori.bat` / `vendor_fetch.bat` wrappers (PowerShell + execution-policy
+  bypass) and updated the README to use them.
+
 ## [0.1.0] - 2026-06-08
 
 Initial version: a React single-page app (`web/`) talking to a local FastAPI
