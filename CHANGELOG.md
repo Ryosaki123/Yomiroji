@@ -28,6 +28,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 - Setup couldn't be launched from cmd (`.ps1` doesn't run there). Added
   `setup_irodori.bat` / `vendor_fetch.bat` wrappers (PowerShell + execution-policy
   bypass) and updated the README to use them.
+- `setup_irodori.ps1` aborted on git's normal stderr output (PowerShell treats it as
+  fatal under `ErrorActionPreference=Stop`). Rewritten to run native commands without
+  letting stderr abort, check real exit codes, drop a redundant `git fetch`, be
+  re-runnable (reset/clean before patch), and download models via Python (version-proof).
 
 ## [0.1.0] - 2026-06-08
 
