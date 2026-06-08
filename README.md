@@ -2,6 +2,8 @@
 
 🌐 **English** · [日本語](README.ja.md)
 
+_Built on **[Irodori-TTS](https://github.com/Aratako/Irodori-TTS)** by Aratako (MIT) — thank you! 🙏_
+
 A fully local, offline podcast maker. Paste an LLM-written script with speaker tags,
 give each speaker a distinct cloned voice, and render the whole conversation into
 **one podcast WAV** plus a timestamped transcript (SRT / WebVTT / JSON) for syncing

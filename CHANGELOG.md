@@ -12,36 +12,14 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
-- **Public-release setup & licensing.** `LICENSE` (MIT); `CREDITS.md` attributing the
-  Irodori-TTS engine + models to Aratako (MIT) with the models' ethical-use note;
-  `setup_irodori.ps1` that reproduces the engine from public sources (clones upstream
-  Irodori-TTS at the pinned commit, applies the offline patch, builds a venv, downloads
-  the MIT models from Hugging Face); and `setup/` (the offline patch + requirements).
-- README (EN/JA): **Prerequisites** and **Setup** (automated + manual fallback) and a
-  **License & credits** section. The repo ships no model weights.
+<!-- Add upcoming changes here, grouped by Added / Changed / Fixed / Removed. -->
 
-### Changed
-- README: added an EN/JA language switcher in the header and set the title to **Yomiroji**.
+## [0.1.0] - 2026-06-09
 
-### Fixed
-- Setup couldn't be launched from cmd (`.ps1` doesn't run there). Added
-  `setup_irodori.bat` / `vendor_fetch.bat` wrappers (PowerShell + execution-policy
-  bypass) and updated the README to use them.
-- `setup_irodori.ps1` aborted on git's normal stderr output (PowerShell treats it as
-  fatal under `ErrorActionPreference=Stop`). Rewritten to run native commands without
-  letting stderr abort, check real exit codes, drop a redundant `git fetch`, be
-  re-runnable (reset/clean before patch), and download models via Python (version-proof).
-- The Python version check used an inline `python -c` whose `%`/`[]` got mangled by
-  PowerShell arg-passing; switched to `python --version` and made the check non-fatal.
-- `setup/requirements.txt` listed `dacvae` (an offline wheel) as a bare name not on
-  PyPI; pointed it at the upstream git source (`git+https://github.com/facebookresearch/dacvae`).
-
-## [0.1.0] - 2026-06-08
-
-Initial version: a React single-page app (`web/`) talking to a local FastAPI
-backend (`server/`) that runs Irodori-TTS, reusing the `../IrodoriTTS-offline`
-distribution. No external network at runtime.
+First public release. A React single-page app (`web/`) talking to a local FastAPI
+backend (`server/`) that runs Irodori-TTS. MIT-licensed and offline at runtime; ships
+no model weights — `setup_irodori.bat` reproduces the engine from public sources.
+Verified end-to-end on a fresh clone (Python 3.12.x).
 
 ### Added
 - **Script → Cast → Studio** workflow with a session sidebar (multiple podcast
@@ -65,7 +43,13 @@ distribution. No external network at runtime.
 - Default generation quality `num_steps` = 45 (slider up to 120).
 - **Air-gapped tooling**: `vendor_fetch.ps1` (one-time asset fetch),
   `check_offline_ready.ps1`, `package_offline.ps1`, and `run_podcast.bat` launcher.
-- English + Japanese READMEs (`README.md`, `README.ja.md`).
+- English + Japanese READMEs (`README.md`, `README.ja.md`) with a language switcher.
+- **Setup & licensing for public use**: `LICENSE` (MIT) and `CREDITS.md` (attributing the
+  Irodori-TTS engine + models to Aratako, MIT, with the models' ethical-use note);
+  `setup_irodori.bat`/`.ps1` that clones upstream Irodori-TTS at the pinned commit,
+  applies the offline patch, builds a venv, and downloads the MIT models from Hugging
+  Face; `setup/` (offline patch + requirements); and Prerequisites/Setup docs. The repo
+  redistributes no model weights.
 
 ### Notes
 - Irodori parameter mapping: Pace → `duration_scale`, Voice strength →

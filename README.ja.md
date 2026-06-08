@@ -2,6 +2,8 @@
 
 🌐 [English](README.md) · **日本語**
 
+_音声エンジンに Aratako 氏の **[Irodori-TTS](https://github.com/Aratako/Irodori-TTS)**（MIT）を利用しています。感謝！🙏_
+
 完全ローカル・オフラインで動作するポッドキャスト作成ツールです。話者タグ付きの台本
 （LLM が生成したものなど）を貼り付け、話者ごとに別々のクローン音声を割り当て、会話全体を
 **1 つのポッドキャスト WAV** と、タイムスタンプ付きの字幕（SRT / WebVTT / JSON）として
