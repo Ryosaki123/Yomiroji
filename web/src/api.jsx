@@ -38,6 +38,8 @@ window.Api = {
   deleteVoice: (id) => fetch("/api/voices/" + encodeURIComponent(id), { method: "DELETE" }).then((r) => r.json()),
   synthLine: (body) => _post("/api/line/synth", body),
   render: (body) => _post("/api/podcast/render", body),
+  jobStatus: (id) => _get("/api/jobs/" + encodeURIComponent(id)),
+  activeJob: (sessionId) => _get("/api/jobs/active?sessionId=" + encodeURIComponent(sessionId)),
   editLine: (body) => _post("/api/line/edit", body),
   freeModels: () => _post("/api/models/free", {}),
   fileToBase64,

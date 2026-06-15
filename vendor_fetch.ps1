@@ -23,13 +23,18 @@ Get-File "https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" (Join-Path $V
 Write-Host "Fetching Latin display fonts (CJK falls back to system fonts)..."
 $cssUrl = "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..600&family=Space+Grotesk:wght@400..700&family=Space+Mono:wght@400;700&display=swap"
 $css = (Invoke-WebRequest -Uri $cssUrl -UseBasicParsing -Headers @{ "User-Agent" = $UA }).Content
-$urls = [System.Text.RegularExpressions.Regex]::Matches($css, "https://[^)]+\.woff2") | ForEach-Object { $_.Value } | Select-Object -Unique
+# Match both woff2 and ttf — Google's response format depends on the User-Agent.
+$urls = [System.Text.RegularExpressions.Regex]::Matches($css, "https?://[^)]+\.(woff2|ttf)") | ForEach-Object { $_.Value } | Select-Object -Unique
 $i = 0
 foreach ($u in $urls) {
-    $fn = "f$i.woff2"
+    # Preserve the original extension so the CSS format() hint stays correct.
+    $ext = if ($u -match '\.woff2$') { 'woff2' } else { 'ttf' }
+    $fn = "f$i.$ext"
     Get-File $u (Join-Path $Fonts $fn)
     $css = $css.Replace($u, "fonts/$fn")
     $i++
 }
 Set-Content -Path (Join-Path $Vendor "fonts.css") -Value $css -Encoding UTF8
+$check = Get-Content (Join-Path $Vendor "fonts.css") -Raw
+if ($check -match "https?://") { throw "fonts.css still contains a remote URL after vendoring - aborting (air-gap unsafe)." }
 Write-Host "Done. Vendored $i fonts + 3 libs into $Vendor"

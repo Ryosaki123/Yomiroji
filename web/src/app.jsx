@@ -76,6 +76,10 @@ function App() {
   const [toast, setToast] = useState(null);
   const [charMgrOpen, setCharMgrOpen] = useState(false);
   const [titleDraft, setTitleDraft] = useState(null); // null = not editing the top-bar title
+  const [genJobs, setGenJobs] = useState({});  // { [sessionId]: {done,total,running,error,kind} }
+  const pollersRef = useRef({});  // { [sessionId]: interval }
+  const currentJobRef = useRef({});  // { [sessionId]: current jobId, for stale-completion guard }
+  const genRunningRef = React.useRef({});  // { [sessionId]: true/false for double-start guard }
 
   const active = sessions.find((s) => s.id === activeId) || sessions[0];
   useEffect(() => { document.title = window.APP_NAME; }, []);
@@ -93,7 +97,7 @@ function App() {
     window.Api.getModels().then((d) => { if (d.models && d.models.length) window.MODELS = d.models; }).catch(() => {});
     reloadVoices();
   }, [reloadVoices]);
-  // expose for screens (toast + voice-library refresh after create/delete)
+  // expose for screens (toast + voice-library refresh after create/delete, render polling)
   window.__reloadVoices = reloadVoices;
 
   // ---- tweaks → CSS ----
@@ -112,6 +116,154 @@ function App() {
   const showToast = (msg) => { setToast(msg); clearTimeout(window.__tT); window.__tT = setTimeout(() => setToast(null), 2600); };
   window.__toast = showToast;
 
+  // ---- app-level line generation ----
+  const generateSession = React.useCallback(async (sessionId, opts) => {
+    // Guard: if already running, don't double-start
+    if (genRunningRef.current[sessionId]) return false;
+
+    const sess = sessions.find((s) => s.id === sessionId);
+    if (!sess) return false;
+
+    // Find pending lines based on opts.force
+    const pending = opts.force ? sess.lines : sess.lines.filter((l) => l.status !== "ready" || !l.wavUrl);
+    if (pending.length === 0) return true;  // nothing to do counts as success
+
+    // Set the synchronous guard
+    genRunningRef.current[sessionId] = true;
+
+    // Update job state to running
+    setGenJobs((prev) => ({
+      ...prev,
+      [sessionId]: { done: 0, total: pending.length, running: true, error: null, kind: "gen" },
+    }));
+
+    let done = 0;
+    for (const line of pending) {
+      try {
+        const sp = sess.speakers[line.spk] || sess.speakers[0];
+        if (!sp.voiceId) {
+          setGenJobs((prev) => ({ ...prev, [sessionId]: { ...prev[sessionId], error: T("assignVoiceFirst"), running: false } }));
+          showToast(T("assignVoiceFirst"));
+          delete genRunningRef.current[sessionId];
+          return false;
+        }
+
+        // Build synth spec matching StudioScreen's synthSpec
+        const synthSpec = {
+          sessionId, lineId: line.id, text: line.text, voiceId: sp.voiceId,
+          pace: line.pace != null ? line.pace : sp.speed,
+          cfg_scale_speaker: line.cfg != null ? line.cfg : sp.cfg,
+          num_steps: line.steps != null ? line.steps : sp.steps,
+          seed: line.seed != null ? line.seed : null,
+          mood: line.emotion || sp.emotion, lang: sp.lang,
+        };
+
+        // Mark line as generating
+        setLinesForSession(sessionId, (prev) => prev.map((l) => (l.id === line.id ? { ...l, status: "gen" } : l)));
+
+        // Synth the line
+        const r = await window.Api.synthLine(synthSpec);
+
+        // Update line with result and persist seed
+        setLinesForSession(sessionId, (prev) => prev.map((l) =>
+          l.id === line.id ? { ...l, status: "ready", wavUrl: r.wavUrl, dur: r.duration, seed: r.seed } : l
+        ));
+
+        done++;
+        setGenJobs((prev) => ({ ...prev, [sessionId]: { ...prev[sessionId], done } }));
+      } catch (e) {
+        // Error on this line: mark it and stop
+        setLinesForSession(sessionId, (prev) => prev.map((l) => (l.id === line.id ? { ...l, status: "edited" } : l)));
+        setGenJobs((prev) => ({ ...prev, [sessionId]: { ...prev[sessionId], error: String(e.message || e), running: false } }));
+        showToast(String(e.message || e));
+        delete genRunningRef.current[sessionId];
+        return false;
+      }
+    }
+
+    // Success
+    setGenJobs((prev) => ({ ...prev, [sessionId]: { ...prev[sessionId], running: false } }));
+    showToast(T("toastGenerated"));
+    delete genRunningRef.current[sessionId];
+    return true;
+  }, [sessions, T, showToast]);
+
+  // ---- app-level render job polling ----
+  const startRenderPoll = React.useCallback((sessionId, jobId) => {
+    // Re-key pollers by sessionId: clear any existing poller for this session first
+    if (pollersRef.current[sessionId]) clearInterval(pollersRef.current[sessionId]);
+    // Track this as the current job for the session (stale-completion guard)
+    currentJobRef.current[sessionId] = jobId;
+
+    setGenJobs((prev) => ({
+      ...prev,
+      [sessionId]: { done: 0, total: 1, running: true, error: null, kind: "render", jobId },
+    }));
+
+    const poller = setInterval(async () => {
+      try {
+        const job = await window.Api.jobStatus(jobId);
+        // Ignore result if a newer job has since taken over for this session
+        if (currentJobRef.current[sessionId] !== jobId) return;
+        if (job.status === "done") {
+          clearInterval(poller);
+          delete pollersRef.current[sessionId];
+          setGenJobs((prev) => ({
+            ...prev,
+            [sessionId]: { ...prev[sessionId], running: false, error: null },
+          }));
+          showToast(T("toastBuilt"));
+        } else if (job.status === "error") {
+          clearInterval(poller);
+          delete pollersRef.current[sessionId];
+          setGenJobs((prev) => ({
+            ...prev,
+            [sessionId]: { ...prev[sessionId], running: false, error: job.error },
+          }));
+          showToast(job.error);
+        } else {
+          // Still running; update progress
+          setGenJobs((prev) => ({
+            ...prev,
+            [sessionId]: { ...prev[sessionId], done: job.done, total: job.total },
+          }));
+        }
+      } catch (e) {
+        if (currentJobRef.current[sessionId] !== jobId) return;
+        clearInterval(poller);
+        delete pollersRef.current[sessionId];
+        setGenJobs((prev) => ({
+          ...prev,
+          [sessionId]: { ...prev[sessionId], running: false, error: String(e.message || e) },
+        }));
+      }
+    }, 1000);
+
+    pollersRef.current[sessionId] = poller;
+  }, [T, showToast]);
+
+  // ---- on mount: check for active render job to resume ----
+  useEffect(() => {
+    (async () => {
+      try {
+        const activeJob = await window.Api.activeJob(active.id);
+        if (activeJob && activeJob.id && activeJob.status === "running") {
+          startRenderPoll(active.id, activeJob.id);
+        }
+      } catch (e) {}
+    })();
+  }, []);
+
+  // ---- cleanup pollers on unmount ----
+  useEffect(() => {
+    return () => {
+      Object.values(pollersRef.current).forEach((p) => clearInterval(p));
+    };
+  }, []);
+
+  // expose render polling for StudioScreen
+  window.__startRenderPoll = startRenderPoll;
+
   // ---- active-session setters ----
   const patch = (p) => setSessions((prev) => prev.map((s) => (s.id === activeId ? { ...s, ...p, updatedAt: Date.now() } : s)));
   const resolve = (key, updater, prevVal) => (typeof updater === "function" ? updater(prevVal) : updater);
@@ -119,6 +271,8 @@ function App() {
   const setStep = (v) => patch({ step: v });
   const setSpeakers = (u) => setSessions((prev) => prev.map((s) => (s.id === activeId ? { ...s, speakers: resolve("speakers", u, s.speakers), updatedAt: Date.now() } : s)));
   const setLines = (u) => setSessions((prev) => prev.map((s) => (s.id === activeId ? { ...s, lines: resolve("lines", u, s.lines), updatedAt: Date.now() } : s)));
+  // Session-scoped line updater: can update ANY session's lines, not just active
+  const setLinesForSession = (sessionId, u) => setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, lines: resolve("lines", u, s.lines), updatedAt: Date.now() } : s)));
   const setPresets = (u) => setLibrary((prev) => resolve("lib", u, prev));
 
   const globalModel = active.speakers[0] ? active.speakers[0].model : "base";
@@ -182,6 +336,24 @@ function App() {
           <span className="spacer" />
           <Stepper step={active.step} go={setStep} canCast={active.speakers.length > 0} canStudio={active.lines.length > 0} />
           <span className="spacer" />
+          {Object.entries(genJobs).map(([sid, job]) => {
+            if (!job.running) return null;
+            const isActive = sid === activeId;
+            const icon = job.kind === "render" ? "⏳" : "✨";
+            const label = job.kind === "render" ? T("mixing") : T("statusGen");
+            return (
+              <button
+                key={sid}
+                className="model-chip"
+                style={{ cursor: isActive ? "default" : "pointer", opacity: isActive ? 1 : 0.7 }}
+                onClick={() => !isActive && setActiveId(sid)}
+                title={label}
+              >
+                <span className="dot" />
+                <b>{icon} {job.done}/{job.total}</b>
+              </button>
+            );
+          })}
           <Btn kind="soft" size="sm" onClick={() => setTweak("dark", !t.dark)}
             title={T("twDark")}>{t.dark ? "☀️" : "🌙"}</Btn>
           <Btn kind="soft" size="sm" onClick={() => window.postMessage({ type: "__activate_edit_mode" }, "*")}
@@ -211,7 +383,8 @@ function App() {
           {active.step === "studio" && (
             <StudioScreen key={active.id + ":studio"} lines={active.lines} setLines={setLines} speakers={active.speakers}
               sessionId={active.id} title={active.title}
-              onBack={() => setStep("cast")} onToast={showToast} />
+              onBack={() => setStep("cast")} onToast={showToast}
+              genJob={genJobs[active.id]} onGenerate={(opts) => generateSession(active.id, opts)} />
           )}
         </main>
       </div>

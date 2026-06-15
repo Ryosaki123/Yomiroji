@@ -6,7 +6,7 @@ const PAUSE_STEPS = [0.2, 0.4, 0.7, 1.0, 1.5];
 const randSeed = () => Math.floor(Math.random() * 2147483647);
 const numOr = (v, d) => (v === null || v === undefined || v === "" ? d : v);
 
-function StudioScreen({ lines, setLines, speakers, onBack, onToast, sessionId, title }) {
+function StudioScreen({ lines, setLines, speakers, onBack, onToast, sessionId, title, genJob, onGenerate }) {
   const T = window.tr;
   const speakerOf = (l) => speakers[l.spk] || speakers[0];
 
@@ -79,67 +79,84 @@ function StudioScreen({ lines, setLines, speakers, onBack, onToast, sessionId, t
     setLine(id, { ...patch, status: "edited", wavUrl: null });
   React.useEffect(() => { markDirty(); }, []);
 
-  // ---- generate all (sequential, with progress) ----
-  const [genProg, setGenProg] = React.useState(null);
-  const ensureGenerated = async (withProgress) => {
-    const pending = lines.filter((l) => l.status !== "ready" || !l.wavUrl);
-    if (!pending.length) return true;
-    let done = 0;
-    if (withProgress) setGenProg(0);
-    for (const line of pending) {
-      const r = await synthOne(line);
-      done++;
-      if (withProgress) setGenProg(done / pending.length);
-      if (!r) { if (withProgress) setGenProg(null); return false; }
-    }
-    if (withProgress) setGenProg(null);
-    return true;
-  };
-  const genAll = async () => {
+  // Mark mix dirty whenever line audio changes (covers app-level generation)
+  const wavSig = lines.map((l) => l.id + ":" + (l.wavUrl || "")).join("|");
+  React.useEffect(() => { markDirty(); }, [wavSig]);
+
+  // ---- generate all (now app-level; local synthOne only for preview/regenerate) ----
+  const genAll = () => {
     const all = lines.length > 0 && lines.every((l) => l.status === "ready" && l.wavUrl);
     if (all) { onToast(T("toastAllReady")); return; }
-    if (await ensureGenerated(true)) onToast(T("toastGenerated"));
+    onGenerate({});
   };
-  // Force re-synthesis of EVERY line with the current voice settings (keeps each
-  // line's seed, so it applies character/setting changes deterministically).
-  const regenAll = async () => {
+  const regenAll = () => {
     if (!lines.length) return;
-    setGenProg(0);
-    let done = 0;
-    for (const line of lines) {
-      const r = await synthOne(line);
-      done++;
-      setGenProg(done / lines.length);
-      if (!r) { setGenProg(null); return; }
-    }
-    setGenProg(null);
-    onToast(T("toastGenerated"));
+    onGenerate({ force: true });
   };
 
-  // ---- render / rebuild the final podcast ----
-  const doRender = async () => {
-    const body = {
-      sessionId, title: title || "podcast", withSpeaker: true, force: false,
-      tempo: output.tempo, gap_scale: output.gap, lead_in: output.leadIn, peak: output.peak,
-      lines: lines.map((l) => {
-        const sp = speakerOf(l);
-        return {
-          lineId: l.id, speaker: sp.name, text: l.text, voiceId: sp.voiceId,
-          pace: numOr(l.pace, sp.speed), cfg_scale_speaker: numOr(l.cfg, sp.cfg),
-          num_steps: numOr(l.steps, sp.steps), seed: l.seed != null ? l.seed : null,
-          mood: l.emotion || sp.emotion, lang: sp.lang, pauseAfter: l.pauseAfter,
-        };
-      }),
-    };
-    const info = await window.Api.render(body);
-    setRenderInfo(info); setDirty(false);
-    return info;
+  // Build the render request body (shared by rebuild/play/export)
+  const renderBody = () => ({
+    sessionId, title: title || "podcast", withSpeaker: true, force: false,
+    tempo: output.tempo, gap_scale: output.gap, lead_in: output.leadIn, peak: output.peak,
+    lines: lines.map((l) => {
+      const sp = speakerOf(l);
+      return {
+        lineId: l.id, speaker: sp.name, text: l.text, voiceId: sp.voiceId,
+        pace: numOr(l.pace, sp.speed), cfg_scale_speaker: numOr(l.cfg, sp.cfg),
+        num_steps: numOr(l.steps, sp.steps), seed: l.seed != null ? l.seed : null,
+        mood: l.emotion || sp.emotion, lang: sp.lang, pauseAfter: l.pauseAfter,
+      };
+    }),
+  });
+
+  // Per-session in-flight guard: prevents duplicate render/prepareMix calls
+  const renderInFlightRef = React.useRef({});
+
+  // Poll a server-side render job until it finishes; returns the final job dict.
+  const waitJob = async (jobId) => {
+    let job;
+    do {
+      await new Promise((r) => setTimeout(r, 500));
+      job = await window.Api.jobStatus(jobId);
+    } while (job && job.status === "running");
+    return job;
   };
+
+  // Ensure every line is synthesized, then ensure a fresh final mix; returns mix info.
   const prepareMix = async () => {
-    if (!(await ensureGenerated(true))) return null;
-    if (renderInfo && !dirty) return renderInfo;
-    return await doRender();
+    // Per-session in-flight guard: reuse the running promise instead of spawning a duplicate render
+    if (renderInFlightRef.current[sessionId]) return renderInFlightRef.current[sessionId];
+    const promise = (async () => {
+      const pending = lines.filter((l) => l.status !== "ready" || !l.wavUrl);
+      if (pending.length) {
+        const ok = await onGenerate({});
+        if (!ok) return null;
+      }
+      if (renderInfo && !dirty) return renderInfo;
+      // Re-attach to a render already running for this session, else start one.
+      let job = null;
+      const aj = await window.Api.activeJob(sessionId).catch(() => null);
+      if (aj && aj.id) {
+        window.__startRenderPoll(sessionId, aj.id); // refresh global chip on reattach (FIX 1 de-dupes)
+        job = await waitJob(aj.id);
+      } else {
+        const res = await window.Api.render(renderBody());
+        if (!res.jobId) return null;
+        window.__startRenderPoll(sessionId, res.jobId); // keep the global chip in sync
+        job = await waitJob(res.jobId);
+      }
+      if (job && job.status === "done") { setRenderInfo(job.result); setDirty(false); return job.result; }
+      if (job && job.error) onToast(job.error);
+      return null;
+    })();
+    renderInFlightRef.current[sessionId] = promise;
+    try {
+      return await promise;
+    } finally {
+      delete renderInFlightRef.current[sessionId];
+    }
   };
+
   const [rebuilding, setRebuilding] = React.useState(false);
   const rebuild = async () => {
     setRebuilding(true);
@@ -241,7 +258,7 @@ function StudioScreen({ lines, setLines, speakers, onBack, onToast, sessionId, t
         <aside className="rail">
           <div className="rail-card">
             <div className="side-label" style={{ marginBottom: 12 }}>{T("generate")}</div>
-            {genProg === null ? (
+            {!(genJob && genJob.running && genJob.kind === "gen") ? (
               <>
                 <Btn kind="primary" ic="✨" onClick={genAll} style={{ width: "100%" }}>{T("generateAll")}</Btn>
                 <Btn kind="soft" ic="🔄" onClick={regenAll} title={T("regenAllTitle")}
@@ -249,9 +266,9 @@ function StudioScreen({ lines, setLines, speakers, onBack, onToast, sessionId, t
               </>
             ) : (
               <>
-                <div className="gen-bar"><i style={{ width: Math.round(genProg * 100) + "%" }} /></div>
+                <div className="gen-bar"><i style={{ width: (genJob.total ? Math.round(genJob.done / genJob.total * 100) : 0) + "%" }} /></div>
                 <p className="muted" style={{ fontSize: 12.5, margin: "9px 0 0", fontFamily: "var(--font-mono)" }}>
-                  {T("rendering")} {Math.round(genProg * 100)}%
+                  {T("rendering")} {genJob.total ? Math.round(genJob.done / genJob.total * 100) : 0}%
                 </p>
               </>
             )}

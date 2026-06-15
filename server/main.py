@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import secrets
+import threading
 import time
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import editor, runtime_pool, stitch, transcript, voicedesign, voices
+from . import editor, jobs, runtime_pool, stitch, transcript, voicedesign, voices
 from .paths import DATA_DIR, OUTPUTS_DIR, PREVIEWS_DIR, VOICES_DIR, WEB_DIR
 from .synth import synth_line
 
@@ -38,9 +39,26 @@ MODELS = [
 
 
 # ---------- helpers ----------
-def _media_url(path: str | Path) -> str:
-    rel = Path(path).resolve().relative_to(DATA_DIR.resolve())
-    return "/media/" + str(rel).replace("\\", "/")
+def _media_url(path: str | Path) -> str | None:
+    """Return a /media/... URL for a file under DATA_DIR.
+
+    Returns None (instead of raising) if the path cannot be made relative to
+    DATA_DIR or the file does not exist — so one stale/relocated voice cannot
+    500 the entire /api/voices listing.
+    """
+    try:
+        p = Path(path).resolve()
+        if not p.is_file():
+            return None
+        rel = p.relative_to(DATA_DIR.resolve())
+        return "/media/" + str(rel).replace("\\", "/")
+    except ValueError:
+        return None
+
+
+def _media_url_t(path) -> str | None:
+    u = _media_url(path)
+    return f"{u}?t={int(time.time())}" if u else None
 
 
 def _rand_seed() -> int:
@@ -190,8 +208,16 @@ async def voice_preview(req: PreviewReq) -> dict:
     if src == "upload":
         if not req.audio_b64:
             raise HTTPException(400, "audio_b64 required for upload.")
-        await run_in_threadpool(_decode_upload_to_wav, req.audio_b64, req.filename or "ref.wav", out)
-        info = {"duration": None, "sample_rate": None}
+        # Decode upload to ref WAV for cloning
+        ref_wav = PREVIEWS_DIR / f"{preview_id}.ref.wav"
+        await run_in_threadpool(_decode_upload_to_wav, req.audio_b64, req.filename or "ref.wav", ref_wav)
+        # Synthesize sample line cloned from the reference
+        text = (req.sample_text or "").strip() or voicedesign._sample_line(req.lang)
+        info = await run_in_threadpool(
+            synth_line,
+            text=text, ref_wav=str(ref_wav), out_path=str(out), seed=seed,
+            pace=1.0, cfg_scale_speaker=5.0, num_steps=req.num_steps, lang=req.lang,
+        )
     elif src == "auto":
         info = await run_in_threadpool(
             voicedesign.auto_voice,
@@ -214,9 +240,14 @@ def save_voice(req: SaveVoiceReq) -> dict:
             raise HTTPException(404, f"Source voice not found: {req.fromVoiceId}")
         source_wav = Path(voices.load(req.fromVoiceId)["ref_wav"])
     else:
-        source_wav = PREVIEWS_DIR / f"{req.previewId}.wav"
-        if not source_wav.is_file():
-            raise HTTPException(404, "Preview not found (regenerate the voice).")
+        # For upload voices, prefer the ref WAV (raw uploaded reference)
+        ref_wav = PREVIEWS_DIR / f"{req.previewId}.ref.wav"
+        if ref_wav.is_file():
+            source_wav = ref_wav
+        else:
+            source_wav = PREVIEWS_DIR / f"{req.previewId}.wav"
+            if not source_wav.is_file():
+                raise HTTPException(404, "Preview not found (regenerate the voice).")
     preview = source_wav
     vid = "v" + secrets.token_hex(8)
     profile = {
@@ -259,14 +290,14 @@ async def line_synth(req: LineSynthReq) -> dict:
         pace=req.pace, cfg_scale_speaker=req.cfg_scale_speaker, num_steps=req.num_steps,
         lang=req.lang, mood=req.mood,
     )
-    return {"wavUrl": _media_url(out) + f"?t={int(time.time())}", "duration": info["duration"], "seed": seed}
+    return {"wavUrl": _media_url_t(out), "duration": info["duration"], "seed": seed}
 
 
-def _render_blocking(req: RenderReq) -> dict:
+def _render_blocking(req: RenderReq, progress=None) -> dict:
     out_dir = OUTPUTS_DIR / req.sessionId
     out_dir.mkdir(parents=True, exist_ok=True)
     segments = []
-    for ln in req.lines:
+    for i, ln in enumerate(req.lines):
         if not voices.exists(ln.voiceId):
             raise ValueError(f"Voice not found: {ln.voiceId} (line {ln.lineId})")
         profile = voices.load(ln.voiceId)
@@ -281,6 +312,8 @@ def _render_blocking(req: RenderReq) -> dict:
         segments.append(
             {"speaker": ln.speaker, "text": ln.text, "wav": str(seg), "pauseAfter": ln.pauseAfter}
         )
+        if progress:
+            progress(i + 1)
 
     podcast = out_dir / "podcast.wav"
     info = stitch.stitch(
@@ -293,7 +326,7 @@ def _render_blocking(req: RenderReq) -> dict:
         meta={"title": req.title, "sample_rate": info["sample_rate"], "duration": info["duration"], "wav": "podcast.wav"},
     )
     return {
-        "wavUrl": _media_url(podcast) + f"?t={int(time.time())}",
+        "wavUrl": _media_url_t(podcast),
         "srtUrl": _media_url(files["srt"]),
         "vttUrl": _media_url(files["vtt"]),
         "jsonUrl": _media_url(files["json"]),
@@ -306,7 +339,20 @@ def _render_blocking(req: RenderReq) -> dict:
 async def podcast_render(req: RenderReq) -> dict:
     if not req.lines:
         raise HTTPException(400, "No lines to render.")
-    return await run_in_threadpool(_render_blocking, req)
+    jid = jobs.create(req.sessionId, len(req.lines))
+
+    def _progress(done):
+        jobs.update(jid, done=done)
+
+    def _run():
+        try:
+            result = _render_blocking(req, progress=_progress)
+            jobs.update(jid, status="done", result=result)
+        except Exception as e:
+            jobs.update(jid, status="error", error=str(e))
+
+    threading.Thread(daemon=True, target=_run).start()
+    return {"jobId": jid}
 
 
 @app.post("/api/line/edit")
@@ -315,12 +361,26 @@ async def line_edit(req: LineEditReq) -> dict:
     if not seg.is_file():
         raise HTTPException(404, "Line audio not found; generate it first.")
     info = await run_in_threadpool(editor.edit_line, str(seg), str(seg), req.start, req.end, req.op)
-    return {"wavUrl": _media_url(seg) + f"?t={int(time.time())}", "duration": info["duration"]}
+    return {"wavUrl": _media_url_t(seg), "duration": info["duration"]}
 
 
 @app.post("/api/models/free")
 def free_models() -> dict:
     return {"freed": runtime_pool.free_all()}
+
+
+@app.get("/api/jobs/active")
+def get_active_job(sessionId: str) -> dict:
+    j = jobs.find_active(sessionId)
+    return j or {}
+
+
+@app.get("/api/jobs/{jid}")
+def get_job(jid: str) -> dict:
+    j = jobs.get(jid)
+    if j is None:
+        raise HTTPException(404, f"Job not found: {jid}")
+    return j
 
 
 @app.exception_handler(Exception)
